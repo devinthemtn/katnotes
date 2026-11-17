@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -275,7 +276,7 @@ func TestParseTasks(t *testing.T) {
 		t.Fatalf("got %+v", got)
 	}
 	for i := range want {
-		if got[i] != want[i] {
+		if !reflect.DeepEqual(got[i], want[i]) {
 			t.Errorf("task %d = %+v, want %+v", i, got[i], want[i])
 		}
 	}
@@ -308,6 +309,7 @@ func TestStoreTasksAndSetTask(t *testing.T) {
 		t.Errorf("counts = %d/%d", all[0].Open, all[0].Done)
 	}
 
+	s.NoDoneDate = true
 	n, err := s.SetTask(KindPage, b.ID, 1, true)
 	if err != nil {
 		t.Fatal(err)

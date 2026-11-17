@@ -41,6 +41,7 @@ editor = ""                 # falls back to $VISUAL, then $EDITOR, then nano/vim
 default_kind = "page"       # what `katnotes new` makes
 journal_template = "# {{.Date}}\n\n"   # fields: .Date .ID .Weekday .Time
 date_format = "2006-01-02"  # Go time layout for journal titles
+task_done_date = true       # checking a task adds {done:YYYY-MM-DD}
 
 # GUI only
 open_with = ""              # app for Ctrl+Shift+O; empty = system default (xdg-open / open / start)
@@ -62,6 +63,39 @@ Markdown tasks (`- [ ] buy milk`, `- [x] done`) are plain GFM, so they work in a
 - `contains_task: true` in a note's frontmatter while it has tasks. It is kept up to date on every save; `katnotes tasks sync` backfills notes written by other tools.
 - A Tasks tab in the TUI and GUI listing notes with tasks, and a view of every task across notes.
 
+### Task metadata
+
+Due dates, priority and anything else go in one `{key:value …}` block at the end of the task line:
+
+```markdown
+- [ ] Call the plumber {due:2026-11-20 pri:high}
+- [ ] Draft report #work {due:2026-11-21}
+- [x] Pay rent {due:2026-11-01 done:2026-10-30}
+- [ ] Book venue {due:2026-12-01 note:"ask about parking"}
+```
+
+Other Markdown viewers show the block as plain text. The KatNotes preview shows it as chips, and overdue tasks are marked.
+
+- Only a block at the **end** of the line counts. Braces anywhere else are just text, and so is a block inside `` `code` ``.
+- The block holds space-separated `key:value` pairs. Keys are lowercase (`[a-z][a-z0-9_-]*`). A value with spaces goes in double quotes. If any token isn't `key:value`, the braces stay text, so prose like `{x}` is safe.
+- Dates are `YYYY-MM-DD`, so they sort and grep well.
+
+| Key | Meaning |
+|---|---|
+| `due` | due date; tasks sort by it and overdue ones are marked |
+| `pri` | `high`, `med` or `low` |
+| `done` | date the task was checked. KatNotes adds it when you check a task and removes it when you uncheck one (turn off with `task_done_date = false`) |
+| `start` | not actionable before this date; shown dimmed until then |
+
+Any other key (e.g. `project:house`) is kept and can be filtered with `--where`.
+
+Searching is plain grep:
+
+```sh
+rg 'due:2026-11' ~/KatNotes        # due this month
+rg '\{[^}]*pri:high' ~/KatNotes     # high priority
+```
+
 ## CLI
 
 ```
@@ -77,6 +111,8 @@ katnotes rm <id> [-f]
 katnotes search <query> [-p|-j]
 katnotes tags
 katnotes tasks sync [-n]       # set/remove contains_task in every note (-n: dry run)
+katnotes tasks list [--overdue] [--due-before fri] [--pri high] [--where key:value] [-a]
+katnotes tasks set page/<id>:<line> due tomorrow   # set {due:…}; no value removes the key
 katnotes config path|show|edit|set
 ```
 
@@ -100,6 +136,8 @@ Every command accepts `--json` for scripting.
 | `v` | Tasks tab: switch between notes with tasks and all tasks |
 | `a` | Tasks tab: show or hide done tasks |
 | `x` / space | Tasks tab: check or uncheck the selected task |
+| `@` | all tasks: set the due date (`2026-11-20`, `today`, `tom`, `fri`, `+3d`, `+2w`; empty clears) |
+| `p` | all tasks: cycle priority (high → med → low → none) |
 | `enter` | Tasks tab: edit the note at the task's line (vim, nano, helix, code and others) |
 | `?` / `F1` | help popup (shows the version; scrolls if the window is short) |
 | `q` | quit |
@@ -108,7 +146,7 @@ Every command accepts `--json` for scripting.
 
 The window has a sidebar (Pages, Journal, Tags and Tasks tabs, plus search) and an editor with edit, split and preview modes. Notes autosave as you type. A collapsible table above the editor shows the frontmatter, and task boxes in the preview can be clicked.
 
-In the editor, `/` at the start of a line or after a space opens a command menu: `/todo`, `/today`, `/tomorrow`, `/yesterday`, `/time`, plus your own Lua commands (below).
+In the editor, `/` at the start of a line or after a space opens a command menu: `/todo`, `/due`, `/pri`, `/start` (make the line a task and jump into its `{…}` block with value suggestions), `/today`, `/tomorrow`, `/yesterday`, `/time`, plus your own Lua commands (below).
 
 If a note is changed outside the app (by the CLI, the TUI or another editor), the GUI says so instead of overwriting it. Changes made elsewhere are picked up when the window regains focus.
 
@@ -120,8 +158,10 @@ If a note is changed outside the app (by the CLI, the TUI or another editor), th
 | Ctrl+S | save |
 | Ctrl+E | cycle edit, split and preview |
 | Ctrl+Enter | make the line a task, or check/uncheck it |
+| `{` on a task line | start a `{key:value}` block: suggests `due`, `pri`, `start` and keys you've used, then values (dates like `today`, `fri`, `+3d` become `YYYY-MM-DD`) |
+| Ctrl+Space | on a task line: open those suggestions, adding the `{}` block if needed |
 | Ctrl+Shift+P / Ctrl+Shift+: | command palette (zoom, open, terminal, tasks, reload) |
-| Ctrl+Shift+T | all tasks from every note |
+| Ctrl+Shift+T | all tasks from every note: filter by due date, sort by due, set the due date and priority per task |
 | Ctrl+Shift+O | open the note in the default app (`open_with`) |
 | Ctrl+Shift+Z | zoom: hide the sidebar and top bar |
 | Ctrl+= / Ctrl+- / Ctrl+0 | larger, smaller, reset text size |
@@ -149,7 +189,7 @@ You need Go 1.26+ and [go-task](https://taskfile.dev). The GUI also needs `wails
 task build        # bin/katnotes
 task build-gui    # katnotes-gui/bin/katnotes-gui
 task dev-gui      # GUI with hot reload
-task test         # go test -tags gtk3 ./...
+task test         # go test -tags gtk3 ./... and the frontend unit tests (npm test)
 task install      # both binaries into $GOPATH/bin
 ```
 

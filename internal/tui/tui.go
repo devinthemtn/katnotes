@@ -58,6 +58,7 @@ const (
 	inSearch
 	inTag
 	inRename
+	inDue
 )
 
 // list items
@@ -118,10 +119,50 @@ func (i taskItem) Title() string {
 	if text == "" {
 		text = "(empty task)"
 	}
-	return strings.Repeat(" ", min(i.t.Indent, 8)) + box + text
+	return strings.Repeat(" ", min(i.t.Indent, 8)) + box + priMark(i.t) + text
 }
 func (i taskItem) Description() string {
-	return fmt.Sprintf("%s · %s/%s:%d", i.n.Title, i.n.Kind, i.n.ID, i.t.Line+1)
+	parts := []string{}
+	if d := dueLabel(i.t, time.Now()); d != "" {
+		parts = append(parts, d)
+	}
+	if s, ok := i.t.Meta[notes.MetaStart]; ok && !i.t.Done && s > time.Now().Format(notes.DateLayout) {
+		parts = append(parts, "starts "+s)
+	}
+	parts = append(parts, fmt.Sprintf("%s · %s/%s:%d", i.n.Title, i.n.Kind, i.n.ID, i.t.Line+1))
+	return strings.Join(parts, " · ")
+}
+
+// priMark is a short priority prefix for a task title.
+func priMark(t notes.Task) string {
+	switch t.Meta[notes.MetaPri] {
+	case "high":
+		return priHigh.Render("!!!") + " "
+	case "med":
+		return priMed.Render("!!") + " "
+	case "low":
+		return priLow.Render("!") + " "
+	}
+	return ""
+}
+
+// dueLabel describes a task's due date relative to now, styled when it is
+// overdue or due today.
+func dueLabel(t notes.Task, now time.Time) string {
+	d, ok := t.Meta[notes.MetaDue]
+	if !ok {
+		return ""
+	}
+	today := now.Format(notes.DateLayout)
+	switch {
+	case t.Done:
+		return "due " + d
+	case d < today:
+		return errStyle.Render("overdue " + d)
+	case d == today:
+		return filterStyle.Render("due today")
+	}
+	return "due " + d
 }
 func (i taskItem) FilterValue() string { return i.t.Text }
 
@@ -132,6 +173,19 @@ func firstOpen(ts []notes.Task) (notes.Task, bool) {
 		}
 	}
 	return notes.Task{}, false
+}
+
+// nextPriority cycles none → high → med → low → none.
+func nextPriority(p string) string {
+	switch p {
+	case "":
+		return "high"
+	case "high":
+		return "med"
+	case "med":
+		return "low"
+	}
+	return ""
 }
 
 // itemKey identifies a list item across reloads.
@@ -183,6 +237,9 @@ var (
 	filterStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#E0AF68"))
 	statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
 	errStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#F7768E"))
+	priHigh     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#F7768E"))
+	priMed      = lipgloss.NewStyle().Foreground(lipgloss.Color("#E0AF68"))
+	priLow      = lipgloss.NewStyle().Foreground(lipgloss.Color("#7AA2F7"))
 	paneBorder  = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("238"))
 )
 
@@ -209,6 +266,7 @@ type model struct {
 	query     string
 	allTasks  bool                   // Tasks tab: list every task instead of notes with tasks
 	showDone  bool                   // Tasks tab, all-tasks view: include checked tasks
+	dueTask   *taskItem              // task whose due date the input prompt is editing
 	results   map[string]notes.Match // kind/id -> match while searching
 
 	status  string
@@ -247,20 +305,22 @@ func (m *model) reload() {
 	var err error
 	switch m.tab {
 	case tabTasks:
+		if m.allTasks {
+			// Every task, sorted by due date, then priority.
+			var all []notes.TaskRef
+			all, err = m.app.Store.AllTasks(notes.TaskFilter{IncludeDone: m.showDone})
+			for _, r := range all {
+				if m.taskMatches(notes.NoteTasks{Note: r.Note}, &r.Task) {
+					items = append(items, taskItem{n: r.Note, t: r.Task})
+				}
+			}
+			break
+		}
 		var all []notes.NoteTasks
 		all, err = m.app.Store.Tasks("")
 		for _, nt := range all {
-			if !m.allTasks {
-				if m.taskMatches(nt, nil) {
-					items = append(items, taskNoteItem{nt})
-				}
-				continue
-			}
-			for _, t := range nt.Tasks {
-				if (t.Done && !m.showDone) || !m.taskMatches(nt, &t) {
-					continue
-				}
-				items = append(items, taskItem{n: nt.Note, t: t})
+			if m.taskMatches(nt, nil) {
+				items = append(items, taskNoteItem{nt})
 			}
 		}
 	case tabTags:
@@ -582,6 +642,25 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.reload()
 		}
 		return m, nil
+	case "@":
+		if it, ok := m.list.SelectedItem().(taskItem); ok {
+			m.dueTask = &it
+			return m, m.startInput(inDue, "Due (YYYY-MM-DD, today, tom, fri, +3d; empty clears): ", it.t.Meta[notes.MetaDue])
+		}
+		return m, nil
+	case "p":
+		if it, ok := m.list.SelectedItem().(taskItem); ok {
+			next := nextPriority(it.t.Meta[notes.MetaPri])
+			if _, err := m.app.Store.SetTaskMeta(it.n.Kind, it.n.ID, it.t.Line, notes.MetaPri, next); err != nil {
+				m.setErr(err)
+			} else if next == "" {
+				m.setStatus("priority cleared")
+			} else {
+				m.setStatus("priority " + next)
+			}
+			m.reload()
+		}
+		return m, nil
 	case "e", "enter":
 		switch it := m.list.SelectedItem().(type) {
 		case taskItem:
@@ -673,6 +752,22 @@ func (m model) submit(val string) (tea.Model, tea.Cmd) {
 	case inTag:
 		m.tagFilter = strings.ToLower(strings.TrimPrefix(val, "#"))
 		m.list.Select(0)
+		m.reload()
+	case inDue:
+		it := m.dueTask
+		m.dueTask = nil
+		if it == nil {
+			return m, nil
+		}
+		if _, err := m.app.Store.SetTaskMeta(it.n.Kind, it.n.ID, it.t.Line, notes.MetaDue, val); err != nil {
+			m.setErr(err)
+			return m, nil
+		}
+		if val == "" {
+			m.setStatus("due date cleared")
+		} else {
+			m.setStatus("due date set")
+		}
 		m.reload()
 	case inRename:
 		if n := m.selected(); n != nil && val != "" {
@@ -773,7 +868,7 @@ func (m model) View() string {
 	if m.tab == tabTasks {
 		view := "v all tasks"
 		if m.allTasks {
-			view = "v notes · a done · x check"
+			view = "v notes · a done · x check · @ due · p priority"
 		}
 		help = statusStyle.Render(": commands · ? help · enter edit at task · " + view + " · / search · t tag · tab switch · q quit")
 	}
@@ -816,6 +911,8 @@ var helpSections = []struct {
 		{"enter / e", "edit the note at the (first open) task line"},
 		{"x / space", "check or uncheck the selected task"},
 		{"a", "all-tasks view: show or hide done tasks"},
+		{"@", "all-tasks view: set the due date (today, tom, fri, +3d, …)"},
+		{"p", "all-tasks view: cycle priority (high → med → low → none)"},
 	}},
 	{"Finding", []helpEntry{
 		{"/", "full-text search"},

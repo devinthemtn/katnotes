@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/BurntSushi/toml"
 	"github.com/devinthemtn/katnotes/internal/config"
@@ -350,8 +352,141 @@ func tasksCmd(a *App) *cobra.Command {
 		},
 	}
 	sync.Flags().BoolVarP(&dryRun, "dry-run", "n", false, "show what would change without writing")
-	cmd.AddCommand(sync)
+	cmd.AddCommand(sync, tasksListCmd(a), tasksSetCmd(a))
 	return cmd
+}
+
+func tasksListCmd(a *App) *cobra.Command {
+	var f notes.TaskFilter
+	var dueBefore, pri, kind string
+	var where []string
+	var overdue bool
+	c := &cobra.Command{
+		Use:   "list",
+		Short: "List tasks across notes, sorted by due date and priority",
+		Long: "List tasks from every note. Task metadata is a {key:value …} block at the\n" +
+			"end of the task line, e.g. \"- [ ] call {due:2026-11-20 pri:high}\".\n" +
+			"Dates for --due-before accept YYYY-MM-DD, today, tomorrow, +3d, fri, ….",
+		Example: "  katnotes tasks list --overdue\n" +
+			"  katnotes tasks list --due-before fri --pri high\n" +
+			"  katnotes tasks list --where project:house --all",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			now := time.Now()
+			if overdue {
+				dueBefore = "yesterday"
+			}
+			if dueBefore != "" {
+				d, err := notes.NormalizeDate(dueBefore, now)
+				if err != nil {
+					return err
+				}
+				f.DueBefore = d
+			}
+			if pri != "" {
+				p, err := notes.NormalizePriority(pri)
+				if err != nil {
+					return err
+				}
+				f.Pri = p
+			}
+			if kind != "" {
+				k, err := notes.ParseKind(kind)
+				if err != nil {
+					return err
+				}
+				f.Kind = k
+			}
+			for _, w := range where {
+				k, v, _ := strings.Cut(w, ":")
+				if f.Has == nil {
+					f.Has = map[string]string{}
+				}
+				f.Has[strings.ToLower(k)] = v
+			}
+			ts, err := a.Store.AllTasks(f)
+			if err != nil {
+				return err
+			}
+			if a.jsonOut {
+				if ts == nil {
+					ts = []notes.TaskRef{}
+				}
+				for i := range ts {
+					ts[i].Note.Body = ""
+				}
+				return a.printJSON(ts)
+			}
+			today := now.Format(notes.DateLayout)
+			tw := tabwriter.NewWriter(a.Out, 0, 2, 2, ' ', 0)
+			for _, r := range ts {
+				box := "[ ]"
+				if r.Task.Done {
+					box = "[x]"
+				}
+				due := r.Task.Meta[notes.MetaDue]
+				if due != "" && due < today && !r.Task.Done {
+					due += "!"
+				}
+				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s/%s:%d\n", box, dash(due), dash(r.Task.Meta[notes.MetaPri]),
+					r.Task.Text, r.Note.Kind, r.Note.ID, r.Task.Line+1)
+			}
+			return tw.Flush()
+		},
+	}
+	c.Flags().StringVar(&dueBefore, "due-before", "", "only tasks due on or before this date")
+	c.Flags().BoolVar(&overdue, "overdue", false, "only tasks due before today")
+	c.Flags().StringVar(&pri, "pri", "", "only tasks with this priority (high, med, low)")
+	c.Flags().StringArrayVar(&where, "where", nil, "only tasks with metadata key:value (or just key); repeatable")
+	c.Flags().BoolVarP(&f.IncludeDone, "all", "a", false, "include done tasks")
+	c.Flags().StringVar(&kind, "kind", "", "only page or journal notes")
+	return c
+}
+
+func dash(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
+}
+
+func tasksSetCmd(a *App) *cobra.Command {
+	return &cobra.Command{
+		Use:   "set <kind/id:line> <key> [value]",
+		Short: "Set or remove (no value) a metadata key on one task",
+		Long: "Set a {key:value} entry on the task at a 1-based body line, as printed by\n" +
+			"\"tasks list\". Leave out the value to remove the key. due/start/done accept\n" +
+			"YYYY-MM-DD, today, tomorrow, +3d, fri, …; pri accepts high, med, low (h/m/l).",
+		Example: "  katnotes tasks set page/groceries:3 due fri\n  katnotes tasks set page/groceries:3 pri",
+		Args:    cobra.RangeArgs(2, 3),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			i := strings.LastIndex(args[0], ":")
+			ok := i > 0
+			ref, lineStr := args[0], ""
+			if ok {
+				ref, lineStr = args[0][:i], args[0][i+1:]
+			}
+			kindStr, id, ok2 := strings.Cut(ref, "/")
+			line, err := strconv.Atoi(lineStr)
+			if !ok || !ok2 || err != nil || line < 1 {
+				return fmt.Errorf("want <kind>/<id>:<line>, got %q", args[0])
+			}
+			k, err := notes.ParseKind(kindStr)
+			if err != nil {
+				return err
+			}
+			val := ""
+			if len(args) == 3 {
+				val = args[2]
+			}
+			n, err := a.Store.SetTaskMeta(k, id, line-1, args[1], val)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintln(a.Out, strings.Split(n.Body, "\n")[line-1])
+			return nil
+		},
+	}
 }
 
 func configCmd(a *App) *cobra.Command {

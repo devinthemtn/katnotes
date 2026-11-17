@@ -52,9 +52,10 @@ tasks:
       - wails3 generate bindings -f '-tags {{.GUI_TAGS}}' -ts -i -clean=true
 
   test:
-    desc: Run all Go tests
+    desc: Run all Go tests and the GUI's frontend unit tests
     cmds:
       - go test -tags {{.GUI_TAGS}} ./...
+      - cd katnotes-gui/frontend && npm test --silent
 
   vet:
     desc: Run go vet

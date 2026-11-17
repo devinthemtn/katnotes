@@ -1,6 +1,6 @@
 // Slash commands typed in the editor ("/today", "/todo", …). Everything here
 // produces plain text, so notes stay ordinary Markdown.
-import { applyTodo } from './tasks';
+import { applyTodo, ensureMetaBlock } from './tasks';
 
 export type SlashCommand = {
   name: string;
@@ -9,6 +9,8 @@ export type SlashCommand = {
   text?: () => string;
   // User command from ~/.config/katnotes/commands/<name>.lua (runs in Go).
   user?: boolean;
+  // Task metadata key: make the line a task and move into its {key:…} block.
+  meta?: string;
 };
 
 // What a user Lua command returned (mirrors luacmd.Result).
@@ -27,6 +29,9 @@ export function timeNow(now = new Date()): string {
 
 export const SLASH: SlashCommand[] = [
   { name: 'todo', desc: () => 'Make this line a task  - [ ]' },
+  { name: 'due', desc: () => 'Set the task due date  {due:…}', meta: 'due' },
+  { name: 'pri', desc: () => 'Set the task priority  {pri:…}', meta: 'pri' },
+  { name: 'start', desc: () => 'Set the task start date  {start:…}', meta: 'start' },
   { name: 'today', desc: () => isoDate(0), text: () => isoDate(0) },
   { name: 'tomorrow', desc: () => isoDate(1), text: () => isoDate(1) },
   { name: 'yesterday', desc: () => isoDate(-1), text: () => isoDate(-1) },
@@ -92,6 +97,14 @@ export function expandSlash(line: string, col: number, cmd: SlashCommand): { lin
   const q = slashQuery(line.slice(0, col));
   if (q === null) return null;
   const start = col - q.length - 1;
+  if (cmd.meta) {
+    // Drop the token (and the space it leaves), then open the metadata block.
+    let rest = line.slice(0, start) + line.slice(col);
+    if (start > 0 && rest[start - 1] === ' ' && (rest[start] === ' ' || start === rest.length)) {
+      rest = rest.slice(0, start - 1) + rest.slice(start);
+    }
+    return ensureMetaBlock(rest, cmd.meta);
+  }
   if (!cmd.text) {
     // Line-level command (todo): normalise the token, then reuse applyTodo.
     const withTok = line.slice(0, start) + '/todo' + line.slice(col);

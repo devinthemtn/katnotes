@@ -20,13 +20,218 @@ export function decorateTasks(html: string): string {
       if (part.startsWith('<pre')) return part;
       return part
         .replace(/(<p>|\n)\[( |x|X)\] /g, (_m, lead: string, mark: string) => lead + TASK_INPUT(mark !== ' ') + ' ')
-        .replace(/<input type="checkbox" class="task"/g, () => `<input type="checkbox" class="task" data-task="${n++}"`);
+        .replace(/<input type="checkbox" class="task"/g, () => `<input type="checkbox" class="task" data-task="${n++}"`)
+        .replace(TASK_META_HTML, (m, lead: string, body: string, tail: string) => {
+          const pairs = parseMetaBody(unescapeHTML(body));
+          return pairs ? lead.replace(/\s+$/, '') + ' ' + metaChips(pairs) + tail : m;
+        });
     })
     .join('');
 }
 
-const TASK_LINE = /^(\s*(?:>\s*)*(?:(?:[-*+]|\d+[.)])\s+)?)\[( |x|X)\](?=\s)/;
+// A {…} block at the end of a rendered task's text: after the task input,
+// before the end of the line, paragraph or list item, or a nested list.
+const TASK_META_HTML = /(<input type="checkbox" class="task"[^>]*>(?:(?!<\/li>|<input)[^\n])*?)\{([^{}<>\n]*)\}(\s*(?:<\/p>|<\/li>|<ul|<ol|\n|$))/g;
+
+const escapeHTML = (s: string) =>
+  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const unescapeHTML = (s: string) =>
+  s.replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+
+// Relative state of a date value against today: 'past', 'today' or 'future'.
+export function dateState(d: string, now = today()): 'past' | 'today' | 'future' | '' {
+  if (!DATE_RE.test(d)) return '';
+  return d < now ? 'past' : d === now ? 'today' : 'future';
+}
+
+// The preview's chips for a metadata block. The note text is not changed.
+export function metaChips(pairs: MetaPair[]): string {
+  const chips = pairs.map(({ key, value }) => {
+    let cls = `meta-chip meta-${/^[a-z0-9_-]+$/.test(key) ? key : 'x'}`;
+    let label = `${key} ${value}`;
+    if (key === 'due') {
+      const st = dateState(value);
+      if (st === 'past') cls += ' overdue';
+      if (st === 'today') {
+        cls += ' due-today';
+        label = 'due today';
+      }
+    } else if (key === 'pri') {
+      cls += ` pri-${/^(high|med|low)$/.test(value) ? value : 'other'}`;
+      label = `${value} priority`;
+    } else if (key === 'start' && dateState(value) === 'future') {
+      cls += ' not-started';
+      label = `starts ${value}`;
+    }
+    return `<span class="${cls}" title="${escapeHTML(key + ':' + value)}">${escapeHTML(label)}</span>`;
+  });
+  return `<span class="task-meta">${chips.join('')}</span>`;
+}
+
+export const TASK_LINE = /^(\s*(?:>\s*)*(?:(?:[-*+]|\d+[.)])\s+)?)\[( |x|X)\](?=\s)/;
 const FENCE = /^\s*(```|~~~)/;
+
+// ---- task metadata: a {key:value …} block at the end of a task line ----
+// Mirrors internal/notes/taskmeta.go: only a block at the very end counts,
+// every token must be key:value (keys [a-z][a-z0-9_-]*, values unquoted
+// without spaces or "double quoted"), and a block inside an inline code span
+// is ignored. Anything else stays plain text.
+
+export type MetaPair = { key: string; value: string };
+
+const META_BLOCK = /\{([^{}]*)\}\s*$/;
+const META_PAIR = /^([a-z][a-z0-9_-]*):(?:"([^"]*)"|([^\s"{}]+))/;
+export const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function parseMetaBody(s: string): MetaPair[] | null {
+  s = s.trim();
+  if (!s) return null;
+  const out: MetaPair[] = [];
+  while (s) {
+    const m = s.match(META_PAIR);
+    if (!m) return null;
+    out.push({ key: m[1], value: m[3] !== undefined ? m[3] : m[2] });
+    const rest = s.slice(m[0].length);
+    if (rest && rest[0] !== ' ' && rest[0] !== '\t') return null;
+    s = rest.replace(/^[ \t]+/, '');
+  }
+  return out;
+}
+
+// Split task text into the text before its metadata block and the pairs.
+// `at` is where the block starts, or -1 when there is none.
+export function splitMeta(text: string): { plain: string; pairs: MetaPair[]; at: number } {
+  const m = text.match(META_BLOCK);
+  if (!m || m.index === undefined) return { plain: text, pairs: [], at: -1 };
+  const before = text.slice(0, m.index);
+  if ((before.match(/`/g) ?? []).length % 2 === 1) return { plain: text, pairs: [], at: -1 };
+  const pairs = parseMetaBody(m[1]);
+  if (!pairs) return { plain: text, pairs: [], at: -1 };
+  return { plain: before.replace(/[ \t]+$/, ''), pairs, at: m.index };
+}
+
+// Task text with its metadata block removed.
+export function stripMeta(text: string): string {
+  return splitMeta(text).plain;
+}
+
+export function formatMeta(pairs: MetaPair[]): string {
+  return (
+    '{' +
+    pairs
+      .map(({ key, value }) => key + ':' + (value === '' || /[\s{}"]/.test(value) ? '"' + value.replace(/"/g, "'") + '"' : value))
+      .join(' ') +
+    '}'
+  );
+}
+
+// Set (or with value '' remove) one key in task text's metadata block.
+function withMeta(text: string, key: string, value: string): string {
+  const { plain: p, pairs, at } = splitMeta(text);
+  const plain = at < 0 ? text.replace(/[ \t]+$/, '') : p;
+  const out: MetaPair[] = [];
+  let found = false;
+  for (const pr of pairs) {
+    if (pr.key !== key) out.push(pr);
+    else {
+      if (!found && value !== '') out.push({ key, value });
+      found = true;
+    }
+  }
+  if (!found && value !== '') out.push({ key, value });
+  if (!out.length) return plain;
+  return plain ? plain + ' ' + formatMeta(out) : formatMeta(out);
+}
+
+export const TASK_TEXT = /^(\s*(?:>\s*)*(?:(?:[-*+]|\d+[.)])\s+)?\[(?: |x|X)\]\s+)(.*)$/;
+
+// Set one metadata key on a task line. Returns null when it isn't a task.
+export function setLineMeta(line: string, key: string, value: string): string | null {
+  const m = line.match(TASK_TEXT);
+  if (!m) return null;
+  return m[1] + withMeta(m[2], key, value);
+}
+
+export function today(d = new Date()): string {
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+const WEEKDAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+
+// Turn a typed date into YYYY-MM-DD, like Go's notes.NormalizeDate: ISO
+// dates, today, tomorrow (tom), yesterday, +Nd / +Nw, and weekday names (the
+// next such day, never today). Returns '' for "", "none", "-" and null when
+// it can't be read.
+export function normalizeDate(s: string, now = new Date()): string | null {
+  const v = s.trim().toLowerCase();
+  const day = (n: number) => today(new Date(now.getFullYear(), now.getMonth(), now.getDate() + n));
+  switch (v) {
+    case '': case 'none': case '-': return '';
+    case 'today': case 'tod': return day(0);
+    case 'tomorrow': case 'tom': case 'tmr': return day(1);
+    case 'yesterday': return day(-1);
+  }
+  const rel = v.match(/^\+(\d+)([dw])$/);
+  if (rel) return day(Number(rel[1]) * (rel[2] === 'w' ? 7 : 1));
+  const wd = WEEKDAYS.indexOf(v.slice(0, 3));
+  if (v.length >= 3 && wd >= 0) {
+    const d = (wd - now.getDay() + 7) % 7 || 7;
+    return day(d);
+  }
+  if (DATE_RE.test(v)) {
+    const [y, m, d] = v.split('-').map(Number);
+    const dt = new Date(y, m - 1, d);
+    if (dt.getFullYear() === y && dt.getMonth() === m - 1 && dt.getDate() === d) return v;
+  }
+  return null;
+}
+
+// Make `line` a task with a trailing metadata block and return where the
+// caret should go: right after "key:" (at the start of its value when the key
+// is already there), or inside the block ready for a new key when key is
+// omitted. Used by /due, /pri, /start and Ctrl+Space.
+export function ensureMetaBlock(line: string, key?: string): { line: string; col: number } {
+  if (/^\s*(?:>\s*)*(?:(?:[-*+]|\d+[.)])\s+)?\[( |x|X)\]$/.test(line)) line += ' ';
+  if (!TASK_TEXT.test(line)) line = addBox(line).line;
+  const m = line.match(TASK_TEXT)!;
+  const pre = m[1];
+  const { plain: p, pairs, at } = splitMeta(m[2]);
+  const plain = (at < 0 ? m[2] : p).replace(/[ \t]+$/, '');
+  const lead = pre + (plain ? plain + ' ' : '');
+  // Rebuild the block (normalizing only its spacing), noting where key's value starts.
+  let body = '';
+  let valueAt = -1;
+  for (const pr of pairs) {
+    const piece = formatMeta([pr]).slice(1, -1);
+    if (body) body += ' ';
+    if (pr.key === key && valueAt < 0) valueAt = body.length + key.length + 1;
+    body += piece;
+  }
+  if (key && valueAt < 0) {
+    if (body) body += ' ';
+    body += key + ':';
+    valueAt = body.length;
+  }
+  if (!key) {
+    if (body) body += ' ';
+    valueAt = body.length;
+  }
+  return { line: lead + '{' + body + '}', col: lead.length + 1 + valueAt };
+}
+
+// Whether checking a task from the GUI stamps done:<date> (config task_done_date).
+let stampDone = true;
+export function setStampDone(on: boolean) {
+  stampDone = on;
+}
+
+// Set a task line's box to done/undone, stamping or removing done:<date>.
+function markLine(line: string, done: boolean): string {
+  let out = line.replace(TASK_LINE, (_m, pre: string) => `${pre}[${done ? 'x' : ' '}]`);
+  if (stampDone) out = setLineMeta(out, 'done', done ? today() : '') ?? out;
+  return out;
+}
 
 // Source line index of each task marker, in the same order decorateTasks numbers them.
 export function taskLines(body: string): number[] {
@@ -49,7 +254,8 @@ export function toggleTask(body: string, n: number): string | null {
   const idx = taskLines(body)[n];
   if (idx === undefined) return null;
   const lines = body.split('\n');
-  lines[idx] = lines[idx].replace(TASK_LINE, (_m, pre: string, mark: string) => `${pre}[${mark === ' ' ? 'x' : ' '}]`);
+  const mark = lines[idx].match(TASK_LINE)![2];
+  lines[idx] = markLine(lines[idx], mark === ' ');
   return lines.join('\n');
 }
 
@@ -75,7 +281,7 @@ export function makeTask(line: string): string {
   // "- [ ]" whose trailing space was stripped (GFM needs it): restore it first.
   if (/^\s*(?:>\s*)*(?:(?:[-*+]|\d+[.)])\s+)?\[( |x|X)\]$/.test(line)) line += ' ';
   if (TASK_LINE.test(line)) {
-    return line.replace(TASK_LINE, (_m, pre: string, mark: string) => `${pre}[${mark === ' ' ? 'x' : ' '}]`);
+    return markLine(line, line.match(TASK_LINE)![2] === ' ');
   }
   return addBox(line).line;
 }
@@ -106,13 +312,32 @@ export function applyTodo(line: string, col: number): { line: string; col: numbe
 export function setTaskLine(body: string, line: number, done: boolean, text?: string): string | null {
   const lines = body.split('\n');
   const tasks = taskLines(body);
-  const textOf = (i: number) => lines[i].replace(TASK_LINE, '').trim();
+  // Compare text without metadata, like the Go side's Task.Text.
+  const textOf = (i: number) => stripMeta(lines[i].replace(TASK_LINE, '').trim());
   let idx = tasks.includes(line) && (text === undefined || textOf(line) === text.trim()) ? line : -1;
   if (idx < 0 && text !== undefined) {
     const same = tasks.filter((i) => textOf(i) === text.trim());
     if (same.length === 1) idx = same[0];
   }
   if (idx < 0) return null;
-  lines[idx] = lines[idx].replace(TASK_LINE, (_m, pre: string) => `${pre}[${done ? 'x' : ' '}]`);
+  lines[idx] = markLine(lines[idx], done);
+  return lines.join('\n');
+}
+
+// Set metadata `key` on the task at body line `line` (matching `text` like
+// setTaskLine). Returns null when the task can't be found.
+export function setTaskMetaLine(body: string, line: number, key: string, value: string, text?: string): string | null {
+  const lines = body.split('\n');
+  const tasks = taskLines(body);
+  const textOf = (i: number) => stripMeta(lines[i].replace(TASK_LINE, '').trim());
+  let idx = tasks.includes(line) && (text === undefined || textOf(line) === text.trim()) ? line : -1;
+  if (idx < 0 && text !== undefined) {
+    const same = tasks.filter((i) => textOf(i) === text.trim());
+    if (same.length === 1) idx = same[0];
+  }
+  if (idx < 0) return null;
+  const next = setLineMeta(lines[idx], key, value);
+  if (next === null) return null;
+  lines[idx] = next;
   return lines.join('\n');
 }

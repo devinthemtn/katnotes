@@ -2,6 +2,7 @@ package tui
 
 import (
 	"io"
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -15,6 +16,7 @@ func TestTasksTab(t *testing.T) {
 	if err := st.Init(); err != nil {
 		t.Fatal(err)
 	}
+	st.NoDoneDate = true
 	st.Create(notes.KindPage, "Shop", nil, "- [ ] milk\n- [x] eggs\n")
 	st.Create(notes.KindPage, "Plain", nil, "nothing\n")
 	m := newModel(&cli.App{Store: st, Out: io.Discard}, "dark")
@@ -58,5 +60,27 @@ func TestTasksTab(t *testing.T) {
 	}
 	if it, ok := m.list.SelectedItem().(taskItem); !ok || it.t.Text != "milk" || !it.t.Done {
 		t.Errorf("selection after toggle = %+v", m.list.SelectedItem())
+	}
+
+	// Metadata: p cycles priority, @ sets the due date, and the list sorts by due.
+	st.Create(notes.KindPage, "Later", nil, "- [ ] soon {due:2000-01-01}\n")
+	m.reload()
+	if it, ok := m.list.Items()[0].(taskItem); !ok || it.t.Text != "soon" {
+		t.Fatalf("first item = %+v", m.list.Items()[0])
+	}
+	m.list.Select(0)
+	press("p")
+	if n, _ := st.Get(notes.KindPage, "later"); n.Body != "- [ ] soon {due:2000-01-01 pri:high}\n" {
+		t.Errorf("after p: %q", n.Body)
+	}
+	press("@")
+	m.input.SetValue("2000-02-03")
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(model)
+	if n, _ := st.Get(notes.KindPage, "later"); n.Body != "- [ ] soon {due:2000-02-03 pri:high}\n" {
+		t.Errorf("after @: %q", n.Body)
+	}
+	if !strings.Contains(m.list.Items()[0].(taskItem).Description(), "overdue 2000-02-03") {
+		t.Errorf("description = %q", m.list.Items()[0].(taskItem).Description())
 	}
 }

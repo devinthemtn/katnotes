@@ -23,8 +23,10 @@ var taskLine = regexp.MustCompile(`^(\s*(?:>\s*)*(?:(?:[-*+]|\d+[.)])\s+)?)\[( |
 type Task struct {
 	Line   int    `json:"line"`   // 0-based line in the body
 	Done   bool   `json:"done"`   // [x] / [X]
-	Text   string `json:"text"`   // text after the box
+	Text   string `json:"text"`   // text after the box, without the {…} metadata block
 	Indent int    `json:"indent"` // leading whitespace width (tabs count as 4)
+	// Meta holds the {key:value …} block at the end of the line, if any.
+	Meta map[string]string `json:"meta,omitempty"`
 }
 
 // ParseTasks returns the tasks in body, skipping fenced code blocks.
@@ -50,7 +52,8 @@ func ParseTasks(body string) []Task {
 		if m == nil {
 			continue
 		}
-		out = append(out, Task{Line: i, Done: m[2] != " ", Text: strings.TrimSpace(m[3]), Indent: indentWidth(line)})
+		text, meta := ParseMeta(strings.TrimSpace(m[3]))
+		out = append(out, Task{Line: i, Done: m[2] != " ", Text: text, Indent: indentWidth(line), Meta: meta})
 	}
 	return out
 }
@@ -117,7 +120,46 @@ func (s *Store) Tasks(kind Kind) ([]NoteTasks, error) {
 var ErrTaskMoved = errors.New("note changed: that line is no longer a task")
 
 // SetTask checks (done) or unchecks the task on body line `line` and saves.
+// Unless NoDoneDate is set, checking stamps done:<today> into the task's
+// metadata and unchecking removes it.
 func (s *Store) SetTask(kind Kind, id string, line int, done bool) (*Note, error) {
+	return s.editTaskLine(kind, id, line, func(l string) string {
+		loc := taskLine.FindStringSubmatchIndex(l)
+		mark := " "
+		if done {
+			mark = "x"
+		}
+		// loc[4]:loc[5] is the mark inside the box.
+		l = l[:loc[4]] + mark + l[loc[5]:]
+		if s.NoDoneDate {
+			return l
+		}
+		stamp := ""
+		if done {
+			stamp = s.now().Format(DateLayout)
+		}
+		l, _ = SetLineMeta(l, MetaDone, stamp)
+		return l
+	})
+}
+
+// SetTaskMeta sets one metadata key on the task at body line `line` and
+// saves. Well-known keys are normalized (dates accept "tomorrow", "fri",
+// "+3d"…; pri accepts h/m/l); an empty value removes the key.
+func (s *Store) SetTaskMeta(kind Kind, id string, line int, key, value string) (*Note, error) {
+	key = strings.ToLower(strings.TrimSpace(key))
+	v, err := NormalizeMeta(key, value, s.now())
+	if err != nil {
+		return nil, err
+	}
+	return s.editTaskLine(kind, id, line, func(l string) string {
+		l, _ = SetLineMeta(l, key, v)
+		return l
+	})
+}
+
+// editTaskLine rewrites the task on body line `line` with edit and saves.
+func (s *Store) editTaskLine(kind Kind, id string, line int, edit func(string) string) (*Note, error) {
 	n, err := s.Get(kind, id)
 	if err != nil {
 		return nil, err
@@ -136,23 +178,20 @@ func (s *Store) SetTask(kind Kind, id string, line int, done bool) (*Note, error
 	if !found {
 		return nil, ErrTaskMoved
 	}
-	mark := " "
-	if done {
-		mark = "x"
+	cr := strings.HasSuffix(lines[line], "\r")
+	l := edit(strings.TrimSuffix(lines[line], "\r"))
+	if cr {
+		l += "\r"
 	}
-	lines[line] = taskLine.ReplaceAllString(lines[line], "${1}["+mark+"]"+taskTail(lines[line]))
+	if l == lines[line] {
+		return n, nil
+	}
+	lines[line] = l
 	n.Body = strings.Join(lines, "\n")
 	if err := s.Save(n); err != nil {
 		return nil, err
 	}
 	return n, nil
-}
-
-// taskTail returns what follows the box on a task line, unchanged.
-func taskTail(line string) string {
-	loc := taskLine.FindStringSubmatchIndex(line)
-	// loc[4]/loc[5] bound the mark; the box's "]" is right after it.
-	return strings.ReplaceAll(line[loc[5]+1:], "$", "$$")
 }
 
 // syncTaskFlag sets or clears the contains_task frontmatter key from the body.
@@ -218,4 +257,92 @@ func (s *Store) SyncTaskFlags(dryRun bool) ([]TaskFlagChange, error) {
 		}
 	}
 	return out, nil
+}
+
+// TaskRef is one task with the note it belongs to.
+type TaskRef struct {
+	Note Note `json:"note"`
+	Task Task `json:"task"`
+}
+
+// TaskFilter narrows AllTasks. The zero value lists every open task.
+type TaskFilter struct {
+	// DueBefore keeps tasks due on or before this YYYY-MM-DD date.
+	DueBefore string `json:"dueBefore,omitempty"`
+	// Pri keeps tasks with this priority (high, med or low).
+	Pri string `json:"pri,omitempty"`
+	// Has keeps tasks whose metadata has every key with that value; an
+	// empty value only requires the key to be present.
+	Has map[string]string `json:"has,omitempty"`
+	// IncludeDone also lists checked tasks.
+	IncludeDone bool `json:"includeDone,omitempty"`
+	// Kind limits the notes searched; empty means all kinds.
+	Kind Kind `json:"kind,omitempty"`
+}
+
+// Match reports whether t passes the filter.
+func (f TaskFilter) Match(t Task) bool {
+	if t.Done && !f.IncludeDone {
+		return false
+	}
+	if f.DueBefore != "" {
+		d, ok := t.Meta[MetaDue]
+		if !ok || d > f.DueBefore { // ISO dates compare as strings
+			return false
+		}
+	}
+	if f.Pri != "" && t.Meta[MetaPri] != f.Pri {
+		return false
+	}
+	for k, v := range f.Has {
+		got, ok := t.Meta[k]
+		if !ok || (v != "" && got != v) {
+			return false
+		}
+	}
+	return true
+}
+
+// AllTasks lists the tasks across notes that pass f, sorted by due date
+// (undated last), then priority, then the note's updated time, then line.
+func (s *Store) AllTasks(f TaskFilter) ([]TaskRef, error) {
+	ns, err := s.List(f.Kind, ListOpts{})
+	if err != nil {
+		return nil, err
+	}
+	var out []TaskRef
+	for _, n := range ns {
+		for _, t := range ParseTasks(n.Body) {
+			if f.Match(t) {
+				out = append(out, TaskRef{Note: n, Task: t})
+			}
+		}
+	}
+	SortTasks(out)
+	return out, nil
+}
+
+// SortTasks orders tasks by due date (undated last), priority (highest
+// first), the note's updated time (newest first) and then line.
+func SortTasks(ts []TaskRef) {
+	sort.SliceStable(ts, func(i, j int) bool {
+		a, b := ts[i], ts[j]
+		da, db := a.Task.Meta[MetaDue], b.Task.Meta[MetaDue]
+		if da != db {
+			if da == "" || db == "" {
+				return db == ""
+			}
+			return da < db
+		}
+		if pa, pb := a.Task.Priority(), b.Task.Priority(); pa != pb {
+			return pa > pb
+		}
+		if !a.Note.Updated.Equal(b.Note.Updated) {
+			return a.Note.Updated.After(b.Note.Updated)
+		}
+		if a.Note.Path != b.Note.Path {
+			return a.Note.Path < b.Note.Path
+		}
+		return a.Task.Line < b.Task.Line
+	})
 }

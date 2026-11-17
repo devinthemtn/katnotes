@@ -93,6 +93,8 @@ type Store struct {
 	DateFormat string
 	// Now is the clock; tests can override it.
 	Now func() time.Time
+	// NoDoneDate stops SetTask from stamping done:<date> into task metadata.
+	NoDoneDate bool
 }
 
 // New returns a store rooted at root with default settings.

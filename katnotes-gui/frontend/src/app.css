@@ -372,3 +372,21 @@ kbd {
 }
 .task-text:hover { background: var(--accent-soft); }
 .task-row.done .task-text { color: var(--muted); text-decoration: line-through; }
+.task-row.not-started .task-text { opacity: 0.55; }
+.task-flat { list-style: none; margin: 6px 0 0; padding: 0; }
+.task-tools { display: flex; gap: 4px; align-items: center; opacity: 0; transition: opacity 0.1s; }
+.task-row:hover .task-tools, .task-tools:focus-within { opacity: 1; }
+.task-due { font-size: 12px; padding: 1px 4px; }
+.task-pri { font-size: 12px; font-weight: 700; padding: 1px 7px; }
+
+/* {key:value} task metadata, shown as chips in the preview and task lists */
+.task-meta { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-left: 6px; vertical-align: 1px; text-decoration: none; }
+.meta-chip {
+  font-size: 0.75em; line-height: 1.5; padding: 0 7px; border-radius: 999px;
+  border: 1px solid var(--border); color: var(--muted); white-space: nowrap;
+}
+.meta-chip.overdue { color: var(--danger); border-color: var(--danger); }
+.meta-chip.due-today { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.meta-chip.pri-high { color: var(--danger); border-color: var(--danger); font-weight: 600; }
+.meta-chip.pri-med { color: #c58a1a; border-color: #c58a1a; }
+.meta-chip.not-started { font-style: italic; }

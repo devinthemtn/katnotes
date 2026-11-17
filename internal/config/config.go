@@ -39,6 +39,9 @@ type Config struct {
 	StartPage string `toml:"start_page" json:"start_page"`
 	// FrontmatterCollapsed starts the GUI's frontmatter table folded.
 	FrontmatterCollapsed bool `toml:"frontmatter_collapsed" json:"frontmatter_collapsed"`
+	// TaskDoneDate stamps done:<date> into a task's {…} metadata when it is
+	// checked from KatNotes, and removes it when it is unchecked.
+	TaskDoneDate bool `toml:"task_done_date" json:"task_done_date"`
 	// Font sets the GUI's fonts and base text size.
 	Font Font `toml:"font" json:"font"`
 }
@@ -70,6 +73,7 @@ func Default() Config {
 		JournalTemplate: "# {{.Date}}\n\n",
 		DateFormat:      "2006-01-02",
 		StartPage:       "none",
+		TaskDoneDate:    true,
 		Font:            Font{Size: DefaultFontSize},
 	}
 }
@@ -172,7 +176,7 @@ func ExpandHome(p string) string {
 }
 
 // Keys lists the option names accepted by Set.
-var Keys = []string{"notes_dir", "editor", "default_kind", "journal_template", "date_format", "open_with", "start_page", "frontmatter_collapsed", "font.body", "font.mono", "font.size"}
+var Keys = []string{"notes_dir", "editor", "default_kind", "journal_template", "date_format", "open_with", "start_page", "frontmatter_collapsed", "task_done_date", "font.body", "font.mono", "font.size"}
 
 // Set updates one option in the config file. It edits the file's own values,
 // not the env-overridden view returned by Load.
@@ -211,6 +215,12 @@ func Set(key, value string) error {
 			return fmt.Errorf("frontmatter_collapsed must be true or false, got %q", value)
 		}
 		cfg.FrontmatterCollapsed = b
+	case "task_done_date":
+		b, err := strconv.ParseBool(strings.TrimSpace(value))
+		if err != nil {
+			return fmt.Errorf("task_done_date must be true or false, got %q", value)
+		}
+		cfg.TaskDoneDate = b
 	case "font.body":
 		cfg.Font.Body = strings.TrimSpace(value)
 	case "font.mono":

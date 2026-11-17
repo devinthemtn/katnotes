@@ -34,6 +34,7 @@ func NewStore(cfg config.Config) *notes.Store {
 	s := notes.New(cfg.NotesDir)
 	s.JournalTemplate = cfg.JournalTemplate
 	s.DateFormat = cfg.DateFormat
+	s.NoDoneDate = !cfg.TaskDoneDate
 	return s
 }
 

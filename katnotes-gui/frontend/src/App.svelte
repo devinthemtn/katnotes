@@ -2,7 +2,8 @@
   import { onMount, tick } from 'svelte';
   import { marked } from 'marked';
   import DOMPurify from 'dompurify';
-  import { checkboxHTML, decorateTasks, toggleTask, makeTask, setTaskLine } from './tasks';
+  import { checkboxHTML, decorateTasks, toggleTask, makeTask, setTaskLine, setTaskMetaLine, metaChips, setStampDone, dateState, today, ensureMetaBlock } from './tasks';
+  import { metaContext, suggest, applySuggestion, shouldPairBrace, type MetaContext, type MetaStat, type Suggestion } from './metacomplete';
   import { SLASH, matchSlash, mergeSlash, slashQuery, slashToken, expandSlash, applyUserResult, caretXY, rank, type SlashCommand } from './slash';
   import { NotesService as api } from '../bindings/github.com/devinthemtn/katnotes/katnotes-gui';
   import type { Note, Match, TagCount, NoteTasks, Task } from '../bindings/github.com/devinthemtn/katnotes/internal/notes';
@@ -21,6 +22,9 @@
   let mainView: 'note' | 'tasks' = $state('note');
   let taskFilter = $state(loadPref('taskFilter', 'open') as 'open' | 'done' | 'all');
   let taskQuery = $state('');
+  // All-tasks view: group by note or one list sorted by due date, and a date filter.
+  let taskSort = $state(loadPref('taskSort', 'note') as 'note' | 'due');
+  let taskWhen = $state(loadPref('taskWhen', 'any') as 'any' | 'overdue' | 'week');
   let matches: Record<string, Match> = $state({});
   let tagFilter = $state('');
   let query = $state('');
@@ -89,6 +93,22 @@
   let allSlash: SlashCommand[] = $state(SLASH);
   let slashItems = $derived(slashOpen ? matchSlash(slashQ, allSlash).slice(0, 6) : []);
 
+  // editor {key:value} metadata menu
+  let metaOpen = $state(false);
+  let metaSel = $state(0);
+  let metaCtx: MetaContext | null = $state(null);
+  let metaPos = $state({ left: 0, top: 0, above: false });
+  let metaStats: MetaStat[] = $state([]);
+  let metaItems: Suggestion[] = $derived(metaOpen && metaCtx ? suggest(metaCtx, metaStats) : []);
+
+  async function loadMetaStats() {
+    try {
+      metaStats = (await api.TaskMetaStats()) ?? [];
+    } catch {
+      /* suggestions just lack the user's own keys */
+    }
+  }
+
   async function loadUserSlash(announce = false) {
     try {
       const res = await api.SlashCommands();
@@ -122,6 +142,8 @@
       ['/', `In the editor: slash commands (${SLASH.map((c) => c.name).join(', ')})`],
       ['/your-command', 'Lua commands from ~/.config/katnotes/commands/*.lua (:reload after editing)'],
       [`${modLabel}+Enter`, 'In the editor: make the line a task, or check/uncheck it'],
+      ['{', 'On a task line: start a {key:value} block; suggests due, pri, start and your keys, then values'],
+      ['Ctrl+Space', 'On a task line: open the {…} suggestions (adds the block if needed)'],
       ['Click a box', 'In the preview: check or uncheck a task'],
       ['Tab', 'In the editor: indent two spaces'],
     ]},
@@ -216,6 +238,7 @@
 
   function setCurrent(n: Note | null) {
     slashOpen = false;
+    metaOpen = false;
     current = n;
     if (n) savePref('lastNote', keyOf(n));
     conflict = false;
@@ -258,6 +281,7 @@
         saveState = 'saved';
       }
       await refreshList();
+      loadMetaStats();
     } catch (e) {
       const msg = errMsg(e);
       saveState = 'error';
@@ -391,6 +415,7 @@
 
   function setView(m: ViewMode) {
     slashOpen = false;
+    metaOpen = false;
     viewMode = m;
     savePref('viewMode', m);
   }
@@ -412,6 +437,7 @@
       const c = await api.ReloadConfig();
       applyFonts(c);
       fmOpen = !c.frontmatter_collapsed;
+      setStampDone(c.task_done_date !== false);
       if (settingsOpen) cfg = c;
       await loadUserSlash(true);
       await loadInfo();
@@ -429,6 +455,7 @@
       const c = await api.GetConfig();
       applyFonts(c);
       fmOpen = !c.frontmatter_collapsed;
+      setStampDone(c.task_done_date !== false);
       start = c.start_page || 'none';
     } catch { return; }
     if (start === 'today') return openToday();
@@ -619,7 +646,29 @@
 
   // ---- tasks across notes ----
   function taskVisible(t: Task): boolean {
-    return taskFilter === 'all' || (taskFilter === 'done' ? t.done : !t.done);
+    if (!(taskFilter === 'all' || (taskFilter === 'done' ? t.done : !t.done))) return false;
+    if (taskWhen === 'any') return true;
+    const due = t.meta?.due ?? '';
+    if (!due) return false;
+    if (taskWhen === 'overdue') return dateState(due) === 'past';
+    const week = new Date();
+    week.setDate(week.getDate() + 7);
+    return due <= today(week);
+  }
+  const PRI_RANK: Record<string, number> = { high: 3, med: 2, low: 1 };
+  // Due date (undated last), then priority, like Go's notes.SortTasks.
+  function byDue(a: Task, b: Task): number {
+    const da = a.meta?.due ?? '', db = b.meta?.due ?? '';
+    if (da !== db) return !da ? 1 : !db ? -1 : da < db ? -1 : 1;
+    return (PRI_RANK[b.meta?.pri ?? ''] ?? 0) - (PRI_RANK[a.meta?.pri ?? ''] ?? 0);
+  }
+  function chipsOf(t: Task): string {
+    const m = t.meta ?? {};
+    const pairs = Object.keys(m).map((key) => ({ key, value: m[key] ?? '' }));
+    return pairs.length ? metaChips(pairs) : '';
+  }
+  function notStarted(t: Task): boolean {
+    return !t.done && dateState(t.meta?.start ?? '') === 'future';
   }
   function noteMatches(nt: NoteTasks, q: string): boolean {
     if (tagFilter && !(nt.note.tags ?? []).includes(tagFilter)) return false;
@@ -642,6 +691,20 @@
       .filter((g) => g.tasks.length);
   });
   let taskCount = $derived(taskGroups.reduce((n, g) => n + g.tasks.length, 0));
+  // Due-sorted view: every visible task in one list.
+  let taskFlat = $derived(
+    taskGroups
+      .flatMap((g) => g.tasks.map((t) => ({ nt: g.nt, t })))
+      .sort((a, b) => byDue(a.t, b.t) || (a.nt.note.path < b.nt.note.path ? -1 : a.nt.note.path > b.nt.note.path ? 1 : a.t.line - b.t.line))
+  );
+  function setTaskSort(v: 'note' | 'due') {
+    taskSort = v;
+    savePref('taskSort', v);
+  }
+  function setTaskWhen(v: 'any' | 'overdue' | 'week') {
+    taskWhen = v;
+    savePref('taskWhen', v);
+  }
 
   function setTaskFilter(f: 'open' | 'done' | 'all') {
     taskFilter = f;
@@ -650,6 +713,7 @@
 
   async function showTasks() {
     slashOpen = false;
+    metaOpen = false;
     mainView = 'tasks';
     taskNotes = (await api.Tasks().catch(() => taskNotes)) ?? [];
   }
@@ -689,6 +753,36 @@
       flash(errMsg(e), true);
     }
     await refreshList();
+  }
+
+  // Set one metadata key on a task from the all-tasks view ('' removes it).
+  async function setTaskMetaIn(nt: NoteTasks, t: Task, key: string, value: string) {
+    if (current && keyOf(current) === keyOf(nt.note)) {
+      const next = setTaskMetaLine(draftBody, t.line, key, value, t.text);
+      if (next === null) {
+        flash('that task moved in the editor; list refreshed', true);
+        await refreshList();
+        return;
+      }
+      draftBody = next;
+      onEdit();
+      const m = { ...(t.meta ?? {}) };
+      if (value) m[key] = value;
+      else delete m[key];
+      t.meta = m;
+      return;
+    }
+    try {
+      await api.SetTaskMeta(nt.note.kind, nt.note.id, t.line, key, value);
+      taskNotes = (await api.Tasks()) ?? [];
+    } catch (e) {
+      flash(errMsg(e), true);
+    }
+  }
+  function cyclePri(nt: NoteTasks, t: Task) {
+    const order = ['', 'high', 'med', 'low'];
+    const next = order[(order.indexOf(t.meta?.pri ?? '') + 1) % order.length];
+    setTaskMetaIn(nt, t, 'pri', next);
   }
 
   // Open a note and put the cursor at the start of a body line.
@@ -778,7 +872,7 @@
       draftBody = draftBody.slice(0, from) + text + draftBody.slice(to);
       onEdit();
     }
-    tick().then(() => bodyEl?.setSelectionRange(caret, caret));
+    return tick().then(() => bodyEl?.setSelectionRange(caret, caret));
   }
 
   // The line around the caret: start, end, and caret column.
@@ -810,16 +904,85 @@
     if (!slashOpen || q !== slashQ) slashSel = 0;
     slashQ = q;
     // Anchor the menu at the "/" so it doesn't slide while typing.
-    const c = caretXY(bodyEl, l!.pos - q.length - 1);
-    const top = bodyEl.offsetTop + c.y - bodyEl.scrollTop;
-    const paneH = bodyEl.offsetParent ? (bodyEl.offsetParent as HTMLElement).clientHeight : bodyEl.clientHeight;
+    slashPos = menuPos(l!.pos - q.length - 1);
+    slashOpen = true;
+    metaOpen = false;
+  }
+
+  // Where to put a dropdown anchored at text offset `at` in the editor.
+  function menuPos(at: number) {
+    const ta = bodyEl!;
+    const c = caretXY(ta, at);
+    const top = ta.offsetTop + c.y - ta.scrollTop;
+    const paneH = ta.offsetParent ? (ta.offsetParent as HTMLElement).clientHeight : ta.clientHeight;
     const above = top + c.lineHeight + 200 > paneH && top > 200;
-    slashPos = {
-      left: Math.max(4, Math.min(bodyEl.offsetLeft + c.x - bodyEl.scrollLeft, bodyEl.offsetLeft + bodyEl.clientWidth - 260)),
+    return {
+      left: Math.max(4, Math.min(ta.offsetLeft + c.x - ta.scrollLeft, ta.offsetLeft + ta.clientWidth - 260)),
       top: above ? top : top + c.lineHeight,
       above,
     };
-    slashOpen = true;
+  }
+
+  // Re-check whether the caret is inside a task's {…} block and show/hide
+  // the key/value suggestions. The slash menu takes precedence.
+  function updateMeta() {
+    const l = caretLine();
+    const ctx = l && !slashOpen ? metaContext(l.text, l.col) : null;
+    if (!bodyEl || !ctx || !suggest(ctx, metaStats).length) {
+      metaOpen = false;
+      metaCtx = null;
+      return;
+    }
+    const same = metaOpen && metaCtx && metaCtx.kind === ctx.kind && metaCtx.from === ctx.from;
+    if (!same) metaSel = 0;
+    metaCtx = ctx;
+    metaPos = menuPos(l!.start + ctx.from);
+    metaOpen = true;
+  }
+
+  function acceptMeta(sug: Suggestion | undefined) {
+    const l = caretLine();
+    const ctx = metaCtx;
+    metaOpen = false;
+    if (!sug || !l || !ctx) return;
+    const r = applySuggestion(l.text, ctx, sug);
+    replaceRange(l.start, l.end, r.line, l.start + r.col)?.then(updateMeta);
+  }
+
+  // Put the caret in the line's {…} block (adding it, and the task box, if
+  // needed) and open the suggestions. With key, the caret lands on its value.
+  function openMetaBlock(key?: string) {
+    const l = caretLine();
+    if (!l) return;
+    const r = ensureMetaBlock(l.text, key);
+    replaceRange(l.start, l.end, r.line, l.start + r.col)?.then(updateMeta);
+  }
+
+  // Keys for the metadata menu and the "{" pairing. Returns true when handled.
+  function metaKey(e: KeyboardEvent): boolean {
+    const mod = e.ctrlKey || e.metaKey;
+    if (e.key === ' ' && e.ctrlKey && !e.shiftKey && !e.altKey) {
+      openMetaBlock();
+    } else if (e.key === '{' && !mod && !e.altKey) {
+      const l = caretLine();
+      if (!l || !shouldPairBrace(l.text, l.col)) return false;
+      replaceRange(l.pos, l.pos, '{}', l.pos + 1)?.then(updateMeta);
+    } else if (!metaOpen || !metaItems.length) {
+      return false;
+    } else if (e.key === 'ArrowDown' || (mod && e.key.toLowerCase() === 'n')) {
+      metaSel = (metaSel + 1) % metaItems.length;
+    } else if (e.key === 'ArrowUp' || (mod && e.key.toLowerCase() === 'p')) {
+      metaSel = (metaSel - 1 + metaItems.length) % metaItems.length;
+    } else if (e.key === 'Enter' || e.key === 'Tab') {
+      acceptMeta(metaItems[metaSel]);
+    } else if (e.key === 'Escape') {
+      metaOpen = false;
+    } else {
+      return false;
+    }
+    e.preventDefault();
+    e.stopPropagation();
+    return true;
   }
 
   async function acceptSlash(cmd: SlashCommand | undefined) {
@@ -828,7 +991,7 @@
     if (!cmd || !l) return;
     if (!cmd.user) {
       const r = expandSlash(l.text, l.col, cmd);
-      if (r) replaceRange(l.start, l.end, r.line, l.start + r.col);
+      if (r) replaceRange(l.start, l.end, r.line, l.start + r.col)?.then(() => { if (cmd.meta) updateMeta(); });
       return;
     }
     const tok = slashToken(l.text, l.col);
@@ -895,6 +1058,7 @@
 
   function onBodyKey(e: KeyboardEvent) {
     if (slashKey(e)) return;
+    if (metaKey(e)) return;
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !e.shiftKey && !e.altKey) {
       e.preventDefault();
       e.stopPropagation();
@@ -919,6 +1083,7 @@
     loadInfo().catch((e) => flash(errMsg(e), true));
     refreshList().then(openStartPage);
     loadUserSlash();
+    loadMetaStats();
     window.addEventListener('focus', onFocus);
     // Ctrl+Shift+Z is bound in main.go (Wails swallows it on Linux).
     window.addEventListener('katnotes:toggle-zoom', toggleZoom);
@@ -1049,11 +1214,42 @@
             <button class:active={taskFilter === 'done'} onclick={() => setTaskFilter('done')}>Done</button>
             <button class:active={taskFilter === 'all'} onclick={() => setTaskFilter('all')}>All</button>
           </div>
+          <div class="seg" title="Due date">
+            <button class:active={taskWhen === 'any'} onclick={() => setTaskWhen('any')}>Any date</button>
+            <button class:active={taskWhen === 'overdue'} onclick={() => setTaskWhen('overdue')}>Overdue</button>
+            <button class:active={taskWhen === 'week'} onclick={() => setTaskWhen('week')}>Next 7 days</button>
+          </div>
+          <div class="seg" title="Sort">
+            <button class:active={taskSort === 'note'} onclick={() => setTaskSort('note')}>By note</button>
+            <button class:active={taskSort === 'due'} onclick={() => setTaskSort('due')}>By due</button>
+          </div>
           <input class="tasks-filter" type="search" placeholder="Filter tasks…" bind:value={taskQuery} />
           {#if tagFilter}<span class="chip">#{tagFilter}</span>{/if}
           <button class="link" onclick={() => (mainView = 'note')} title="Esc">Back to note</button>
         </header>
+        {#snippet taskRow(nt: NoteTasks, t: Task, showNote: boolean)}
+          <li class="task-row" class:done={t.done} class:not-started={notStarted(t)} style:padding-left="{showNote ? 0 : Math.min(t.indent, 16) * 6}px">
+            <input type="checkbox" class="task" checked={t.done} onclick={(e) => { e.preventDefault(); toggleTaskIn(nt, t); }} aria-label="Toggle task" />
+            <button class="task-text" onclick={() => openAtLine(nt.note.kind, nt.note.id, t.line)} title="Open at this line">
+              {t.text || '(empty task)'}
+              {#if chipsOf(t)}{@html chipsOf(t)}{/if}
+              {#if showNote}<span class="task-note-meta"> · {nt.note.title}</span>{/if}
+            </button>
+            <span class="task-tools">
+              <input type="date" class="task-due" value={t.meta?.due ?? ''} title="Due date" aria-label="Due date"
+                onchange={(e) => setTaskMetaIn(nt, t, 'due', (e.currentTarget as HTMLInputElement).value)} />
+              <button class="task-pri" onclick={() => cyclePri(nt, t)} title="Priority: none → high → med → low">!</button>
+            </span>
+          </li>
+        {/snippet}
         <div class="tasks-body">
+          {#if taskSort === 'due' && taskFlat.length}
+            <ul class="task-flat">
+              {#each taskFlat as r (keyOf(r.nt.note) + '#' + r.t.line)}
+                {@render taskRow(r.nt, r.t, true)}
+              {/each}
+            </ul>
+          {:else}
           {#each taskGroups as g (keyOf(g.nt.note))}
             <div class="task-group">
               <button class="task-note" onclick={() => open(g.nt.note.kind, g.nt.note.id)}>
@@ -1061,21 +1257,17 @@
                 <span class="task-note-meta">{g.nt.note.kind === 'journal' ? g.nt.note.id : 'page'} · {g.nt.open} open · {g.nt.done} done</span>
               </button>
               <ul>
-                {#each g.tasks as t (t.line)}
-                  <li class="task-row" class:done={t.done} style:padding-left="{Math.min(t.indent, 16) * 6}px">
-                    <input type="checkbox" class="task" checked={t.done} onclick={(e) => { e.preventDefault(); toggleTaskIn(g.nt, t); }} aria-label="Toggle task" />
-                    <button class="task-text" onclick={() => openAtLine(g.nt.note.kind, g.nt.note.id, t.line)} title="Open at this line">
-                      {t.text || '(empty task)'}
-                    </button>
-                  </li>
+                {#each g.tasks.toSorted((a, b) => (taskSort === 'due' ? byDue(a, b) : 0)) as t (t.line)}
+                  {@render taskRow(g.nt, t, false)}
                 {/each}
               </ul>
             </div>
           {:else}
             <p class="empty">
-              {taskNotes.length ? `No ${taskFilter === 'all' ? '' : taskFilter + ' '}tasks${taskQuery || tagFilter ? ' match' : ''}.` : 'No tasks yet. Type /todo or press Ctrl+Enter on a line.'}
+              {taskNotes.length ? `No ${taskFilter === 'all' ? '' : taskFilter + ' '}tasks${taskQuery || tagFilter || taskWhen !== 'any' ? ' match' : ''}.` : 'No tasks yet. Type /todo or press Ctrl+Enter on a line.'}
             </p>
           {/each}
+          {/if}
         </div>
       </section>
     {:else if current}
@@ -1132,12 +1324,12 @@
             class="editor"
             bind:this={bodyEl}
             bind:value={draftBody}
-            oninput={() => { onEdit(); updateSlash(); }}
+            oninput={() => { onEdit(); updateSlash(); updateMeta(); }}
             onkeydown={onBodyKey}
-            onkeyup={(e) => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) updateSlash(); }}
-            onclick={updateSlash}
-            onblur={() => (slashOpen = false)}
-            onscroll={() => { if (slashOpen) updateSlash(); }}
+            onkeyup={(e) => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) { updateSlash(); updateMeta(); } }}
+            onclick={() => { updateSlash(); updateMeta(); }}
+            onblur={() => { slashOpen = false; metaOpen = false; }}
+            onscroll={() => { if (slashOpen) updateSlash(); if (metaOpen) updateMeta(); }}
             spellcheck="true"
           ></textarea>
           {#if slashOpen && slashItems.length}
@@ -1150,6 +1342,20 @@
                     <span class="cmd-name">/{c.name}</span>
                     <span class="cmd-desc">{c.desc()}</span>
                     {#if c.user}<span class="lua-badge">lua</span>{/if}
+                  </button>
+                </li>
+              {/each}
+            </ul>
+          {/if}
+          {#if metaOpen && metaItems.length}
+            <ul class="slash-menu meta-menu" class:above={metaPos.above} style:left="{metaPos.left}px" style:top="{metaPos.top}px" role="listbox">
+              {#each metaItems as sug, i (sug.label + sug.insert)}
+                <li role="option" aria-selected={i === metaSel}>
+                  <button class="slash-item" class:active={i === metaSel} tabindex="-1"
+                    onmousedown={(e) => { e.preventDefault(); metaSel = i; acceptMeta(sug); }}
+                    onmouseenter={() => (metaSel = i)}>
+                    <span class="cmd-name">{sug.label}{sug.then ? ':' : ''}</span>
+                    <span class="cmd-desc">{sug.detail}</span>
                   </button>
                 </li>
               {/each}

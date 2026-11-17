@@ -13,7 +13,12 @@
      */
     "allowJs": true,
     "checkJs": true,
-    "isolatedModules": true
+    "isolatedModules": true,
+    // metacomplete.ts imports "./tasks.ts" so `node --test` can run it directly.
+    "allowImportingTsExtensions": true,
+    "noEmit": true
   },
   "include": ["src/**/*.ts", "src/**/*.js", "src/**/*.svelte", "bindings"],
+  // Node tests (npm test) use node:test types that the app doesn't ship.
+  "exclude": ["src/**/*.test.ts"],
 }

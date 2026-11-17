@@ -355,3 +355,28 @@ func (s *NotesService) SetTask(kind, id string, line int, done bool) (*notes.Not
 	}
 	return st.SetTask(k, id, line, done)
 }
+
+// SetTaskMeta sets one {key:value} metadata entry on the task at a note's
+// body line and saves it; an empty value removes the key. Dates accept
+// "tomorrow", "fri", "+3d" and the like.
+func (s *NotesService) SetTaskMeta(kind, id string, line int, key, value string) (*notes.Note, error) {
+	st := s.lock()
+	defer s.mu.Unlock()
+	k, err := notes.ParseKind(kind)
+	if err != nil {
+		return nil, err
+	}
+	return st.SetTaskMeta(k, id, line, key, value)
+}
+
+// TaskMetaStats lists the task metadata keys in use and their common values,
+// for the editor's {…} autocomplete.
+func (s *NotesService) TaskMetaStats() ([]notes.MetaKeyStat, error) {
+	st := s.lock()
+	defer s.mu.Unlock()
+	out, err := st.MetaStats()
+	if out == nil {
+		out = []notes.MetaKeyStat{}
+	}
+	return out, err
+}
