@@ -77,6 +77,7 @@ Every command accepts `--json` for scripting.
 | `t` | filter by tag (`enter` on the Tags tab does the same) |
 | `esc` | clear filters |
 | `J` / `K` | scroll the preview |
+| `?` / `F1` | help popup (shows the version; scrolls if the window is short) |
 | `q` | quit |
 
 ## GUI
@@ -92,6 +93,7 @@ If a note is changed outside the app (by the CLI, the TUI or another editor), th
 | Ctrl+K | search |
 | Ctrl+S | save |
 | Ctrl+E | cycle edit, split and preview |
+| `?` / F1 | help popup with the app version (`?` works when you're not typing in a field) |
 
 ## Building
 

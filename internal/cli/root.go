@@ -22,6 +22,8 @@ type App struct {
 	Cfg   config.Config
 	Store *notes.Store
 	Out   io.Writer
+	// Version of the running binary.
+	Version string
 
 	jsonOut bool
 	dir     string
@@ -40,7 +42,7 @@ type TUIFunc func(app *App) error
 
 // NewRoot builds the root command. With no subcommand it runs tui.
 func NewRoot(version string, tui TUIFunc) *cobra.Command {
-	app := &App{Out: os.Stdout}
+	app := &App{Out: os.Stdout, Version: version}
 	root := &cobra.Command{
 		Use:           "katnotes",
 		Short:         "Personal Markdown notes: pages and a daily journal",

@@ -36,6 +36,35 @@
   let newTitle = $state('');
   let deleteOpen = $state(false);
   let settingsOpen = $state(false);
+  let helpOpen = $state(false);
+
+  const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform);
+  const modLabel = isMac ? '⌘' : 'Ctrl';
+  const helpSections: { title: string; keys: [string, string][] }[] = [
+    { title: 'Notes', keys: [
+      [`${modLabel}+N`, 'New page (or journal entry on the Journal tab)'],
+      [`${modLabel}+J`, "Open today's journal entry"],
+      [`${modLabel}+S`, 'Save now (notes also autosave as you type)'],
+      ['Enter', 'In the title field: rename the note'],
+      ['Tab', 'In the editor: indent two spaces'],
+    ]},
+    { title: 'Finding', keys: [
+      [`${modLabel}+K / ${modLabel}+F`, 'Focus search'],
+      ['Tags tab', 'Click a tag to filter Pages and Journal'],
+      ['clear', 'Remove the search and tag filter'],
+    ]},
+    { title: 'View', keys: [
+      [`${modLabel}+E`, 'Cycle Edit → Split → Preview'],
+    ]},
+    { title: 'General', keys: [
+      ['? / F1', 'Toggle this help (? works outside text fields)'],
+      ['Esc', 'Close dialogs'],
+    ]},
+    { title: 'Outside changes', keys: [
+      ['Window focus', 'Reloads notes edited by the CLI or TUI'],
+      ['Conflict bar', 'Reload theirs, or keep your version'],
+    ]},
+  ];
   let cfg: Config | null = $state(null);
 
   let searchEl: HTMLInputElement | undefined = $state();
@@ -328,13 +357,24 @@
     }
   }
 
+  function isTyping(t: EventTarget | null): boolean {
+    const el = t as HTMLElement | null;
+    if (!el) return false;
+    return el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName);
+  }
+
   function onKey(e: KeyboardEvent) {
     const mod = e.ctrlKey || e.metaKey;
     if (e.key === 'Escape') {
-      if (newOpen || deleteOpen || settingsOpen) {
-        newOpen = deleteOpen = settingsOpen = false;
+      if (newOpen || deleteOpen || settingsOpen || helpOpen) {
+        newOpen = deleteOpen = settingsOpen = helpOpen = false;
         e.preventDefault();
       }
+      return;
+    }
+    if (e.key === 'F1' || (e.key === '?' && !mod && !e.altKey && !isTyping(e.target))) {
+      e.preventDefault();
+      helpOpen = !helpOpen;
       return;
     }
     if (!mod) return;
@@ -378,7 +418,8 @@
   <aside class="sidebar">
     <div class="brand">
       <span class="logo">🐾</span> KatNotes
-      <button class="icon" title="Settings" onclick={openSettings}>⚙</button>
+      <button class="icon" title="Keyboard help (?)" onclick={() => (helpOpen = true)}>?</button>
+      <button class="icon settings" title="Settings" onclick={openSettings}>⚙</button>
     </div>
 
     <div class="actions">
@@ -551,6 +592,35 @@
         <button onclick={() => (deleteOpen = false)}>Cancel</button>
         <button class="danger" onclick={confirmDelete}>Delete</button>
       </div>
+    </div>
+  </div>
+{/if}
+
+{#if helpOpen}
+  <div class="backdrop" role="presentation" onclick={() => (helpOpen = false)}>
+    <div class="modal help" role="dialog" aria-label="Keyboard help" tabindex="-1" onclick={(e) => e.stopPropagation()} onkeydown={() => {}}>
+      <header class="help-head">
+        <div>
+          <div class="help-title">Keyboard help</div>
+          <div class="help-sub">KatNotes desktop</div>
+        </div>
+        <span class="version-pill">katnotes-gui {version || 'dev'}</span>
+      </header>
+      <div class="help-body">
+        {#each helpSections as sec}
+          <h3>{sec.title}</h3>
+          <dl>
+            {#each sec.keys as [k, d]}
+              <dt><kbd>{k}</kbd></dt>
+              <dd>{d}</dd>
+            {/each}
+          </dl>
+        {/each}
+      </div>
+      <footer class="help-foot">
+        <span class="hint">Esc or ? to close</span>
+        <button class="primary" onclick={() => (helpOpen = false)}>Close</button>
+      </footer>
     </div>
   </div>
 {/if}

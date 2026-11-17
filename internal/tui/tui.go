@@ -46,6 +46,7 @@ const (
 	modeNormal mode = iota
 	modeInput
 	modeConfirm
+	modeHelp
 )
 
 type inputPurpose int
@@ -118,6 +119,7 @@ type model struct {
 	purpose inputPurpose
 	input   textinput.Model
 	confirm *notes.Note
+	help    viewport.Model
 
 	tagFilter string
 	query     string
@@ -143,7 +145,7 @@ func newModel(app *cli.App, style string) model {
 	ti := textinput.New()
 	ti.CharLimit = 200
 
-	m := model{app: app, style: style, list: l, view: viewport.New(0, 0), input: ti, cache: map[string]string{}}
+	m := model{app: app, style: style, list: l, view: viewport.New(0, 0), help: viewport.New(0, 0), input: ti, cache: map[string]string{}}
 	m.reload()
 	return m
 }
@@ -251,6 +253,7 @@ func (m *model) layout() {
 		pw = 10
 	}
 	m.view.Width, m.view.Height = pw-2, bodyH-2
+	m.sizeHelp()
 	r, err := glamour.NewTermRenderer(glamour.WithStandardStyle(m.style), glamour.WithWordWrap(m.view.Width-2))
 	if err == nil {
 		m.render = r
@@ -346,6 +349,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateInput(msg)
 		case modeConfirm:
 			return m.updateConfirm(msg)
+		case modeHelp:
+			return m.updateHelp(msg)
 		}
 		return m.updateNormal(msg)
 	}
@@ -358,6 +363,12 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q", "ctrl+c":
 		return m, tea.Quit
+	case "?", "f1":
+		m.mode = modeHelp
+		m.sizeHelp()
+		m.help.SetContent(helpBody())
+		m.help.GotoTop()
+		return m, nil
 	case "tab", "right", "l":
 		m.tab = (m.tab + 1) % 3
 		m.list.Select(0)
@@ -580,6 +591,123 @@ func (m model) View() string {
 			}
 		}
 	}
-	help := statusStyle.Render("n new · enter/e edit · r rename · d delete · T today · / search · t tag · tab switch · J/K scroll · q quit")
+	if m.mode == modeHelp {
+		return m.helpView()
+	}
+	help := statusStyle.Render("? help · n new · enter/e edit · r rename · d delete · T today · / search · t tag · tab switch · J/K scroll · q quit")
 	return lipgloss.JoinVertical(lipgloss.Left, header, filterLine, body, bottom, help)
+}
+
+// help popup
+
+var (
+	helpBox     = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("#7D56F4")).Padding(0, 1)
+	helpBanner  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF")).Background(lipgloss.Color("#7D56F4")).Padding(0, 1)
+	helpVersion = lipgloss.NewStyle().Italic(true).Foreground(lipgloss.Color("#E0AF68"))
+	helpSection = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#9D7DF8"))
+	helpKey     = lipgloss.NewStyle().Bold(true).Width(16)
+)
+
+type helpEntry struct{ key, desc string }
+
+var helpSections = []struct {
+	title   string
+	entries []helpEntry
+}{
+	{"Navigation", []helpEntry{
+		{"↑/↓  j/k", "move selection"},
+		{"tab  →  l", "next tab"},
+		{"shift+tab ← h", "previous tab"},
+		{"1 2 3", "Pages / Journal / Tags"},
+		{"J / K", "scroll preview (also pgdn/pgup, ctrl+d/u)"},
+	}},
+	{"Notes", []helpEntry{
+		{"n", "new page (or journal entry on the Journal tab)"},
+		{"enter / e", "edit in $EDITOR"},
+		{"r", "rename"},
+		{"d / delete", "delete (asks to confirm)"},
+		{"T", "open today's journal"},
+		{"R", "reload from disk"},
+	}},
+	{"Finding", []helpEntry{
+		{"/", "full-text search"},
+		{"t", "filter by tag"},
+		{"enter", "on the Tags tab: filter by that tag"},
+		{"esc", "clear search and tag filter"},
+	}},
+	{"General", []helpEntry{
+		{"? / F1", "toggle this help"},
+		{"q / ctrl+c", "quit"},
+	}},
+}
+
+func helpBody() string {
+	var b strings.Builder
+	for i, sec := range helpSections {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(helpSection.Render(sec.title) + "\n")
+		for _, e := range sec.entries {
+			b.WriteString("  " + helpKey.Render(e.key) + e.desc + "\n")
+		}
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+func helpLines() int { return strings.Count(helpBody(), "\n") + 1 }
+
+// sizeHelp fits the help viewport to its content, capped by the window.
+func (m *model) sizeHelp() {
+	w := 64
+	if m.width-6 < w {
+		w = m.width - 6
+	}
+	// box border (2) + banner (1) + blank (1) + footer (1) + margin (2)
+	h := m.height - 7
+	if n := helpLines(); n < h {
+		h = n
+	}
+	if w < 10 {
+		w = 10
+	}
+	if h < 1 {
+		h = 1
+	}
+	m.help.Width, m.help.Height = w, h
+}
+
+func (m model) updateHelp(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "?", "f1", "esc", "q", "enter":
+		m.mode = modeNormal
+		return m, nil
+	case "ctrl+c":
+		return m, tea.Quit
+	case "g", "home":
+		m.help.GotoTop()
+		return m, nil
+	case "G", "end":
+		m.help.GotoBottom()
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.help, cmd = m.help.Update(msg) // j/k, arrows, pgup/pgdn, ctrl+u/d
+	return m, cmd
+}
+
+func (m model) helpView() string {
+	w := m.help.Width
+	banner := helpBanner.Width(w).Render("KatNotes — keyboard help")
+	ver := helpVersion.Width(w).Align(lipgloss.Right).Render("katnotes " + m.app.Version)
+	foot := "esc/? close"
+	if !(m.help.AtTop() && m.help.AtBottom()) {
+		foot = fmt.Sprintf("↑/↓ scroll · %3.0f%% · ", m.help.ScrollPercent()*100) + foot
+	}
+	box := helpBox.Render(lipgloss.JoinVertical(lipgloss.Left,
+		lipgloss.JoinVertical(lipgloss.Left, banner, ver),
+		m.help.View(),
+		statusStyle.Width(w).Align(lipgloss.Right).Render(foot),
+	))
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
 }
