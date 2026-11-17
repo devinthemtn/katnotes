@@ -1,0 +1,9 @@
+/bin/
+/katnotes
+katnotes-gui/bin/
+katnotes-gui/.task/
+katnotes-gui/frontend/node_modules/
+katnotes-gui/frontend/dist/*
+!katnotes-gui/frontend/dist/.gitkeep
+katnotes-gui/frontend/bindings/
+.task/

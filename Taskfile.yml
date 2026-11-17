@@ -1,0 +1,81 @@
+# Build tasks for katnotes (CLI + TUI) and katnotes-gui (Wails v3 GUI).
+# Requires go-task. Run "task --list" to see all tasks.
+version: '3'
+
+vars:
+  BIN_DIR: bin
+  GUI_DIR: katnotes-gui
+  # GUI tasks run the Wails Taskfile in katnotes-gui/ as a sub-process,
+  # since its tasks expect ROOT_DIR to be katnotes-gui/.
+  GUI_TASK: '"{{.TASK_EXE}}" -d {{.GUI_DIR}}'
+  # Linux GUI builds use GTK3 + webkit2gtk-4.1 (Wails v3 defaults to GTK4).
+  GUI_TAGS: gtk3
+  VERSION:
+    sh: git describe --tags --always --dirty 2>/dev/null || echo dev
+  LDFLAGS: -X main.version={{.VERSION}}
+  BINDIR:
+    sh: echo "$(go env GOPATH)/bin"
+  EXE:
+    sh: go env GOEXE
+
+tasks:
+  default:
+    desc: Build both the CLI/TUI and the GUI
+    cmds:
+      - task: build
+      - task: build-gui
+
+  build:
+    desc: Build katnotes (CLI + TUI, no CGO)
+    env:
+      CGO_ENABLED: '0'
+    cmds:
+      - go build -ldflags="{{.LDFLAGS}}" -o {{.BIN_DIR}}/katnotes{{.EXE}} ./cmd/katnotes
+
+  build-gui:
+    desc: Build katnotes-gui (needs the wails3 CLI)
+    preconditions:
+      - sh: command -v wails3
+        msg: "wails3 not found: go install github.com/wailsapp/wails/v3/cmd/wails3@latest"
+    cmds:
+      - '{{.GUI_TASK}} build VERSION={{.VERSION}}'
+
+  dev-gui:
+    desc: Run the GUI with hot reload
+    cmds:
+      - '{{.GUI_TASK}} dev'
+
+  bindings:
+    desc: Regenerate the GUI's TypeScript bindings
+    dir: '{{.GUI_DIR}}'
+    cmds:
+      - wails3 generate bindings -f '-tags {{.GUI_TAGS}}' -ts -i -clean=true
+
+  test:
+    desc: Run all Go tests
+    cmds:
+      - go test -tags {{.GUI_TAGS}} ./...
+
+  vet:
+    desc: Run go vet
+    cmds:
+      - go vet -tags {{.GUI_TAGS}} ./...
+
+  check-frontend:
+    desc: Type-check the Svelte frontend
+    deps: [bindings]
+    dir: '{{.GUI_DIR}}/frontend'
+    cmds:
+      - npx svelte-check --tsconfig ./tsconfig.json
+
+  install:
+    desc: Install katnotes and katnotes-gui into BINDIR (default $GOPATH/bin)
+    deps: [build, build-gui]
+    cmds:
+      - install -m 755 {{.BIN_DIR}}/katnotes{{.EXE}} {{.BINDIR}}/
+      - install -m 755 {{.GUI_DIR}}/bin/katnotes-gui{{.EXE}} {{.BINDIR}}/
+
+  clean:
+    desc: Remove build output
+    cmds:
+      - rm -rf {{.BIN_DIR}} {{.GUI_DIR}}/bin

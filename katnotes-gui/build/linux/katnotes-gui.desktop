@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=katnotes-gui
+Exec=katnotes-gui
+Icon=katnotes-gui
+Categories=Development;
+Terminal=false
+Keywords=wails
+Version=1.0
+StartupNotify=false
