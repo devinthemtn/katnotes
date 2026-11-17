@@ -211,3 +211,53 @@ func ids(ns []Note) []string {
 	}
 	return out
 }
+
+func TestHasTask(t *testing.T) {
+	for body, want := range map[string]bool{
+		"- [ ] a\n":                  true,
+		"* [x] done\n":               true,
+		"1. [X] n\n":                 true,
+		"[ ] bare\n":                 true,
+		"> - [ ] quoted\n":           true,
+		"plain [ ] text\n":           false,
+		"- [link](x)\n":              false,
+		"```\n- [ ] in code\n```\n":  false,
+		"~~~\n[ ] x\n~~~\n- [ ] y\n": true,
+		"":                           false,
+	} {
+		if got := HasTask(body); got != want {
+			t.Errorf("HasTask(%q) = %v, want %v", body, got, want)
+		}
+	}
+}
+
+func TestContainsTaskFrontmatter(t *testing.T) {
+	s := newStore(t)
+	n, err := s.Create(KindPage, "Shopping", nil, "- [ ] milk\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(n.Path)
+	if !strings.Contains(string(raw), "contains_task: true\n") {
+		t.Fatalf("created file missing flag:\n%s", raw)
+	}
+
+	n.Extra["mood"] = "ok" // unrelated keys must survive
+	n.Body = "no tasks now\n"
+	if err := s.Save(n); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ = os.ReadFile(n.Path)
+	if strings.Contains(string(raw), TaskKey) || !strings.Contains(string(raw), "mood: ok") {
+		t.Fatalf("after removing tasks:\n%s", raw)
+	}
+
+	got, _ := s.Get(KindPage, n.ID)
+	got.Body = "- [x] milk\n"
+	if err := s.Save(got); err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := s.Get(KindPage, n.ID); again.Extra[TaskKey] != true {
+		t.Errorf("Extra = %v", again.Extra)
+	}
+}

@@ -338,7 +338,7 @@ func configCmd(a *App) *cobra.Command {
 		},
 		&cobra.Command{
 			Use:   "set <key> <value>",
-			Short: "Set an option (notes_dir, editor, default_kind, journal_template, date_format)",
+			Short: "Set an option (" + strings.Join(config.Keys, ", ") + ")",
 			Args:  cobra.ExactArgs(2),
 			RunE: func(cmd *cobra.Command, args []string) error {
 				return config.Set(args[0], args[1])

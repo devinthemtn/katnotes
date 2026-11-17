@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/devinthemtn/katnotes/internal/cli"
 	"github.com/devinthemtn/katnotes/internal/config"
+	"github.com/devinthemtn/katnotes/internal/luacmd"
 	"github.com/devinthemtn/katnotes/internal/notes"
 )
 
@@ -33,6 +35,9 @@ type Info struct {
 // NewNotesService loads the config and prepares the notes directory.
 func NewNotesService() (*NotesService, error) {
 	s := &NotesService{}
+	if dir, err := commandsDir(); err == nil {
+		luacmd.WriteExample(dir) //nolint:errcheck // the example is a convenience
+	}
 	return s, s.reload()
 }
 
@@ -235,4 +240,93 @@ func (s *NotesService) ChooseNotesDir() (string, error) {
 		return "", fmt.Errorf("$%s is set and overrides the config", config.EnvNotesDir)
 	}
 	return dir, s.SetOption("notes_dir", dir)
+}
+
+// OpenExternal opens a note's file with the open_with option, or the system
+// default app when it is empty.
+func (s *NotesService) OpenExternal(kind, id string) error {
+	st := s.lock()
+	k, err := notes.ParseKind(kind)
+	if err != nil {
+		s.mu.Unlock()
+		return err
+	}
+	path, cmdline := st.Path(k, id), s.cfg.OpenWith
+	s.mu.Unlock()
+	if _, err := os.Stat(path); err != nil {
+		return err
+	}
+	return openExternal(cmdline, path)
+}
+
+// OpenTerminal opens a terminal in the note's folder, or the notes folder
+// when kind/id are empty.
+func (s *NotesService) OpenTerminal(kind, id string) error {
+	st := s.lock()
+	root, path := st.Root, ""
+	if kind != "" && id != "" {
+		if k, err := notes.ParseKind(kind); err == nil {
+			path = st.Path(k, id)
+		}
+	}
+	s.mu.Unlock()
+	return openTerminal(noteDir(path, root))
+}
+
+// ReloadConfig re-reads config.toml, picking up hand edits without a restart.
+func (s *NotesService) ReloadConfig() (config.Config, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.reload(); err != nil {
+		return s.cfg, err
+	}
+	return s.cfg, nil
+}
+
+func commandsDir() (string, error) {
+	d, err := config.Dir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(d, luacmd.DirName), nil
+}
+
+// SlashList is the user's Lua commands plus any files that failed to load.
+type SlashList struct {
+	Commands []luacmd.Command `json:"commands"`
+	Errors   []string         `json:"errors"`
+}
+
+// SlashCommands lists the user's Lua commands. A broken file is reported in
+// Errors without hiding the commands that loaded.
+func (s *NotesService) SlashCommands() (SlashList, error) {
+	out := SlashList{Commands: []luacmd.Command{}, Errors: []string{}}
+	dir, err := commandsDir()
+	if err != nil {
+		return out, err
+	}
+	cmds, errs := luacmd.List(dir)
+	out.Commands = append(out.Commands, cmds...)
+	for _, e := range errs {
+		out.Errors = append(out.Errors, e.Error())
+	}
+	return out, nil
+}
+
+// RunSlash runs one user Lua command for the open note.
+func (s *NotesService) RunSlash(name string, ctx luacmd.Context) (luacmd.Result, error) {
+	dir, err := commandsDir()
+	if err != nil {
+		return luacmd.Result{}, err
+	}
+	s.mu.Lock()
+	ctx.NotesDir = s.store.Root
+	if k, err := notes.ParseKind(ctx.Note.Kind); err == nil && ctx.Note.ID != "" {
+		ctx.Note.Path = s.store.Path(k, ctx.Note.ID)
+	}
+	s.mu.Unlock()
+	if d, err := config.Dir(); err == nil {
+		ctx.ConfigDir = d
+	}
+	return luacmd.Run(dir, name, ctx)
 }

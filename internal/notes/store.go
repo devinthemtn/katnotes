@@ -522,6 +522,7 @@ func (s *Store) write(n *Note, exclusive bool) error {
 			return fmt.Errorf("%w: %s/%s", ErrExists, n.Kind, n.ID)
 		}
 	}
+	syncTaskFlag(n)
 	data, err := encodeNote(n)
 	if err != nil {
 		return err

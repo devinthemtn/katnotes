@@ -59,3 +59,74 @@ func TestInstallAndSave(t *testing.T) {
 		t.Errorf("got %+v", got)
 	}
 }
+
+func TestSetOpenWith(t *testing.T) {
+	t.Setenv(EnvConfigDir, t.TempDir())
+	t.Setenv(EnvNotesDir, "")
+
+	if err := Set("open_with", "gedit --new-window"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.OpenWith != "gedit --new-window" {
+		t.Errorf("OpenWith = %q", got.OpenWith)
+	}
+}
+
+func TestSetStartPage(t *testing.T) {
+	t.Setenv(EnvConfigDir, t.TempDir())
+	t.Setenv(EnvNotesDir, "")
+
+	if cfg, _ := Load(); cfg.StartPage != "none" {
+		t.Errorf("default StartPage = %q", cfg.StartPage)
+	}
+	for in, want := range map[string]string{"today": "today", "current": "last", "": "none", "page/ideas": "page/ideas"} {
+		if err := Set("start_page", in); err != nil {
+			t.Fatalf("%q: %v", in, err)
+		}
+		if got, _ := Load(); got.StartPage != want {
+			t.Errorf("%q: StartPage = %q, want %q", in, got.StartPage, want)
+		}
+	}
+	for _, bad := range []string{"tomorrow", "page/", "notes/x"} {
+		if err := Set("start_page", bad); err == nil {
+			t.Errorf("%q: want error", bad)
+		}
+	}
+}
+
+func TestFontOptions(t *testing.T) {
+	t.Setenv(EnvConfigDir, t.TempDir())
+	t.Setenv(EnvNotesDir, "")
+
+	if cfg, _ := Load(); cfg.Font.Size != DefaultFontSize || cfg.Font.Body != "" {
+		t.Errorf("default font = %+v", cfg.Font)
+	}
+	for k, v := range map[string]string{"font.body": "Inter Variable", "font.mono": "Lilex Nerd Font Mono", "font.size": "16px"} {
+		if err := Set(k, v); err != nil {
+			t.Fatalf("%s: %v", k, err)
+		}
+	}
+	got, _ := Load()
+	if got.Font != (Font{Body: "Inter Variable", Mono: "Lilex Nerd Font Mono", Size: 16}) {
+		t.Errorf("font = %+v", got.Font)
+	}
+	for _, bad := range []string{"big", "2", "99"} {
+		if err := Set("font.size", bad); err == nil {
+			t.Errorf("font.size %q: want error", bad)
+		}
+	}
+
+	// The file uses a [font] table like other apps' configs.
+	p, _ := Path()
+	if err := os.WriteFile(p, []byte("[font]\nbody = \"Inter\"\nsize = 200\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = Load()
+	if got.Font.Body != "Inter" || got.Font.Size != DefaultFontSize {
+		t.Errorf("hand-written font = %+v", got.Font)
+	}
+}

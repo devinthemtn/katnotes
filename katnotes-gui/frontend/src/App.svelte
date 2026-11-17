@@ -2,9 +2,13 @@
   import { onMount, tick } from 'svelte';
   import { marked } from 'marked';
   import DOMPurify from 'dompurify';
+  import { checkboxHTML, decorateTasks, toggleTask, makeTask } from './tasks';
+  import { SLASH, matchSlash, mergeSlash, slashQuery, slashToken, expandSlash, applyUserResult, caretXY, rank, type SlashCommand } from './slash';
   import { NotesService as api } from '../bindings/github.com/devinthemtn/katnotes/katnotes-gui';
   import type { Note, Match, TagCount } from '../bindings/github.com/devinthemtn/katnotes/internal/notes';
   import type { Config } from '../bindings/github.com/devinthemtn/katnotes/internal/config';
+
+  marked.use({ renderer: { checkbox: checkboxHTML } });
 
   type Tab = 'page' | 'journal' | 'tags';
   type ViewMode = 'edit' | 'split' | 'preview';
@@ -37,6 +41,69 @@
   let deleteOpen = $state(false);
   let settingsOpen = $state(false);
   let helpOpen = $state(false);
+  let zoomed = $state(false);
+
+  // command palette
+  let cmdOpen = $state(false);
+  let cmdInput = $state('');
+  let cmdSel = $state(0);
+  let cmdEl: HTMLInputElement | undefined = $state();
+
+  // editor slash menu
+  // frontmatter panel above the editor
+  let fmOpen = $state(loadPref('fmOpen', '1') === '1');
+  function fmValue(v: unknown): string {
+    if (v === null || v === undefined) return '';
+    if (Array.isArray(v)) return v.map((x) => fmValue(x)).join(', ');
+    if (typeof v === 'object') return JSON.stringify(v);
+    return String(v);
+  }
+  function fmDate(s: string): string {
+    const d = new Date(s);
+    return isNaN(d.getTime()) ? s : d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  }
+  let fmRows = $derived.by((): [string, string][] => {
+    if (!current) return [];
+    const rows: [string, string][] = [
+      ['title', draftTitle],
+      ['tags', parseTags(draftTags).join(', ')],
+      ['created', fmDate(current.created)],
+      ['updated', fmDate(current.updated)],
+    ];
+    const extra = current.extra ?? {};
+    for (const k of Object.keys(extra).sort()) rows.push([k, fmValue(extra[k])]);
+    return rows;
+  });
+
+  let slashOpen = $state(false);
+  let slashQ = $state('');
+  let slashSel = $state(0);
+  let slashPos = $state({ left: 0, top: 0, above: false });
+  // Built-in plus user Lua commands (~/.config/katnotes/commands/*.lua).
+  let allSlash: SlashCommand[] = $state(SLASH);
+  let slashItems = $derived(slashOpen ? matchSlash(slashQ, allSlash).slice(0, 6) : []);
+
+  async function loadUserSlash(announce = false) {
+    try {
+      const res = await api.SlashCommands();
+      const user: SlashCommand[] = (res.commands ?? []).map((c) => ({
+        name: c.name,
+        desc: () => c.description || 'user command',
+        user: true,
+      }));
+      const { list, shadowed } = mergeSlash(user);
+      allSlash = list;
+      const problems = [...(res.errors ?? []), ...shadowed.map((n) => `${n}.lua: "${n}" is a built-in command`)];
+      if (problems.length) flash(`commands: ${problems.join('; ')}`, true);
+      else if (announce && user.length) flash(`${user.length} user command${user.length === 1 ? '' : 's'} loaded`);
+    } catch (e) {
+      flash(errMsg(e), true);
+    }
+  }
+  let uiScale = $state(Number(loadPref('uiScale', '1')) || 1);
+  $effect(() => {
+    (document.documentElement.style as any).zoom = String(uiScale);
+  });
 
   const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform);
   const modLabel = isMac ? '⌘' : 'Ctrl';
@@ -46,6 +113,10 @@
       [`${modLabel}+J`, "Open today's journal entry"],
       [`${modLabel}+S`, 'Save now (notes also autosave as you type)'],
       ['Enter', 'In the title field: rename the note'],
+      ['/', `In the editor: slash commands (${SLASH.map((c) => c.name).join(', ')})`],
+      ['/your-command', 'Lua commands from ~/.config/katnotes/commands/*.lua (:reload after editing)'],
+      [`${modLabel}+Enter`, 'In the editor: make the line a task, or check/uncheck it'],
+      ['Click a box', 'In the preview: check or uncheck a task'],
       ['Tab', 'In the editor: indent two spaces'],
     ]},
     { title: 'Finding', keys: [
@@ -55,6 +126,11 @@
     ]},
     { title: 'View', keys: [
       [`${modLabel}+E`, 'Cycle Edit → Split → Preview'],
+      [`${modLabel}+= / ${modLabel}+-`, 'Make text larger / smaller'],
+      [`${modLabel}+0`, 'Reset text size'],
+      [`${modLabel}+Shift+O`, 'Open the note in the default app (Settings: open with)'],
+      [`${modLabel}+Shift+P / ${modLabel}+Shift+:`, 'Command palette'],
+      [`${modLabel}+Shift+Z`, 'Zoom: hide the sidebar and top bar (again to exit)'],
     ]},
     { title: 'General', keys: [
       ['? / F1', 'Toggle this help (? works outside text fields)'],
@@ -94,7 +170,7 @@
   const keyOf = (n: { kind: string; id: string }) => `${n.kind}/${n.id}`;
 
   let preview = $derived(
-    DOMPurify.sanitize(marked.parse(draftBody, { async: false, gfm: true, breaks: false }) as string)
+    DOMPurify.sanitize(decorateTasks(marked.parse(draftBody, { async: false, gfm: true, breaks: false }) as string))
   );
 
   function parseTags(s: string): string[] {
@@ -128,7 +204,9 @@
   }
 
   function setCurrent(n: Note | null) {
+    slashOpen = false;
     current = n;
+    if (n) savePref('lastNote', keyOf(n));
     conflict = false;
     dirty = false;
     saveState = 'saved';
@@ -298,11 +376,78 @@
   }
 
   function setView(m: ViewMode) {
+    slashOpen = false;
     viewMode = m;
     savePref('viewMode', m);
   }
 
+  // Apply [font] from config.toml: families go in front of the built-in stacks.
+  const BODY_STACK = 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+  const MONO_STACK = 'ui-monospace, "JetBrains Mono", "Fira Code", Menlo, monospace';
+  function applyFonts(c: Config | null) {
+    const root = document.documentElement.style;
+    const fam = (name: string | undefined, stack: string) =>
+      name && name.trim() ? `"${name.trim().replace(/["\\]/g, '')}", ${stack}` : stack;
+    root.setProperty('--font', fam(c?.font?.body, BODY_STACK));
+    root.setProperty('--mono', fam(c?.font?.mono, MONO_STACK));
+    root.setProperty('--size', `${c?.font?.size || 14}px`);
+  }
+
+  async function reloadConfig() {
+    try {
+      const c = await api.ReloadConfig();
+      applyFonts(c);
+      if (settingsOpen) cfg = c;
+      await loadUserSlash(true);
+      await loadInfo();
+      await refreshList();
+      flash('config reloaded');
+    } catch (e) {
+      flash(errMsg(e), true);
+    }
+  }
+
+  // Open whatever the start_page option asks for on launch.
+  async function openStartPage() {
+    let start = 'none';
+    try {
+      const c = await api.GetConfig();
+      applyFonts(c);
+      start = c.start_page || 'none';
+    } catch { return; }
+    if (start === 'today') return openToday();
+    const target = start === 'last' ? loadPref('lastNote', '') : start;
+    const [kind, ...rest] = target.split('/');
+    const id = rest.join('/');
+    if ((kind !== 'page' && kind !== 'journal') || !id) return;
+    try {
+      const n = await api.Get(kind, id);
+      if (!n) return;
+      tab = kind as Tab;
+      await refreshList();
+      setCurrent(n);
+    } catch {
+      // A start note that was deleted or renamed just falls back to the welcome screen.
+      if (start !== 'last') flash(`start page ${target} not found`, true);
+    }
+  }
+
+  // Settings: start page picker state.
+  let startPages: Note[] = $state([]);
+  let startMode = $derived.by(() => {
+    const v = (cfg as Config | null)?.start_page || 'none';
+    return ['none', 'last', 'today'].includes(v) ? v : 'note';
+  });
+
+  async function setStartMode(mode: string) {
+    if (mode !== 'note') return saveSetting('start_page', mode);
+    const pick = current ? keyOf(current) : startPages[0] ? keyOf(startPages[0]) : '';
+    if (!pick) { flash('no pages to choose from yet', true); return; }
+    await saveSetting('start_page', pick);
+  }
+
   async function openSettings() {
+    try { startPages = (await api.List('page', '')) ?? []; } catch { startPages = []; }
     try {
       cfg = await api.GetConfig();
       settingsOpen = true;
@@ -316,6 +461,7 @@
       await api.SetOption(key, value);
       await loadInfo();
       cfg = await api.GetConfig();
+      applyFonts(cfg);
       flash(`saved ${key}`);
     } catch (e) {
       flash(errMsg(e), true);
@@ -357,6 +503,103 @@
     }
   }
 
+  function toggleZoom() {
+    zoomed = !zoomed;
+  }
+
+  async function openExternal() {
+    if (!current) { flash('no note open', true); return; }
+    await flushSave();
+    try {
+      await api.OpenExternal(current.kind, current.id);
+      flash(`opened ${keyOf(current)}`);
+    } catch (e) {
+      flash(errMsg(e), true);
+    }
+  }
+
+  async function openTerminal() {
+    try {
+      await api.OpenTerminal(current?.kind ?? '', current?.id ?? '');
+    } catch (e) {
+      flash(errMsg(e), true);
+    }
+  }
+
+  type Command = { name: string; desc: string; keys?: string; run: () => void | Promise<void> };
+  const commands: Command[] = [
+    { name: 'zoom', desc: 'Toggle focus mode (hide sidebar and top bar)', keys: `${modLabel}+Shift+Z`, run: toggleZoom },
+    { name: 'open', desc: 'Open the note in the default editor', keys: `${modLabel}+Shift+O`, run: openExternal },
+    { name: 'terminal', desc: "Open a terminal in the note's folder", run: openTerminal },
+    { name: 'reload', desc: 'Reload config.toml and Lua / commands', run: reloadConfig },
+  ];
+
+  let cmdMatches = $derived(rank(commands, cmdInput, (c) => c.desc));
+
+  // Ghost completion: the rest of the selected command's name, when it extends what was typed.
+  let cmdGhost = $derived.by(() => {
+    const c = cmdMatches[cmdSel];
+    const q = cmdInput.trim().toLowerCase();
+    return c && q && c.name.startsWith(q) ? c.name.slice(q.length) : '';
+  });
+
+  async function openPalette() {
+    cmdInput = '';
+    cmdSel = 0;
+    cmdOpen = true;
+    await tick();
+    cmdEl?.focus();
+  }
+
+  async function closePalette() {
+    cmdOpen = false;
+    await tick();
+    bodyEl?.focus();
+  }
+
+  async function runCommand() {
+    const q = cmdInput.trim().toLowerCase();
+    const c = commands.find((x) => x.name === q) ?? cmdMatches[cmdSel];
+    if (!c) {
+      cmdOpen = false;
+      if (q) flash(`unknown command: ${q}`, true);
+      return;
+    }
+    await closePalette();
+    await c.run();
+  }
+
+  function moveSel(d: number) {
+    const n = cmdMatches.length;
+    if (n) cmdSel = (cmdSel + d + n) % n;
+  }
+
+  function onCmdKey(e: KeyboardEvent) {
+    const mod = e.ctrlKey || e.metaKey;
+    if (e.key === 'Escape') {
+      e.preventDefault(); e.stopPropagation(); closePalette();
+    } else if (e.key === 'Enter') {
+      e.preventDefault(); runCommand();
+    } else if (e.key === 'Tab') {
+      e.preventDefault();
+      const c = cmdMatches[cmdSel];
+      if (c && cmdInput.trim().toLowerCase() !== c.name) {
+        cmdInput = c.name;
+      } else {
+        // Already complete: cycle to the next/previous match.
+        moveSel(e.shiftKey ? -1 : 1);
+        if (cmdMatches[cmdSel]) cmdInput = cmdMatches[cmdSel].name;
+      }
+    } else if (e.key === 'ArrowDown' || (mod && e.key.toLowerCase() === 'n')) {
+      e.preventDefault(); e.stopPropagation(); moveSel(1);
+    } else if (e.key === 'ArrowUp' || (mod && e.key.toLowerCase() === 'p')) {
+      e.preventDefault(); e.stopPropagation(); moveSel(-1);
+    } else if (mod) {
+      // Keep global shortcuts (Ctrl+S, Ctrl+K, …) from firing under the palette.
+      e.stopPropagation();
+    }
+  }
+
   function isTyping(t: EventTarget | null): boolean {
     const el = t as HTMLElement | null;
     if (!el) return false;
@@ -366,8 +609,8 @@
   function onKey(e: KeyboardEvent) {
     const mod = e.ctrlKey || e.metaKey;
     if (e.key === 'Escape') {
-      if (newOpen || deleteOpen || settingsOpen || helpOpen) {
-        newOpen = deleteOpen = settingsOpen = helpOpen = false;
+      if (newOpen || deleteOpen || settingsOpen || helpOpen || cmdOpen) {
+        newOpen = deleteOpen = settingsOpen = helpOpen = cmdOpen = false;
         e.preventDefault();
       }
       return;
@@ -378,17 +621,173 @@
       return;
     }
     if (!mod) return;
+    if (e.shiftKey) {
+      const k = e.key.toLowerCase();
+      if (k === 'p' || k === ':' || e.code === 'Semicolon') {
+        e.preventDefault();
+        if (cmdOpen) closePalette(); else openPalette();
+        return;
+      }
+      if (k === 'o') {
+        e.preventDefault();
+        openExternal();
+        return;
+      }
+    }
     switch (e.key.toLowerCase()) {
       case 's': e.preventDefault(); save(true); break;
       case 'n': e.preventDefault(); openNew(); break;
       case 'k':
       case 'f': e.preventDefault(); searchEl?.focus(); searchEl?.select(); break;
       case 'j': e.preventDefault(); openToday(); break;
+      case '=':
+      case '+': e.preventDefault(); setScale(uiScale + 0.1); break;
+      case '-':
+      case '_': e.preventDefault(); setScale(uiScale - 0.1); break;
+      case '0': e.preventDefault(); setScale(1); break;
       case 'e': e.preventDefault(); setView(viewMode === 'edit' ? 'split' : viewMode === 'split' ? 'preview' : 'edit'); break;
     }
   }
 
+  function setScale(v: number) {
+    uiScale = Math.round(Math.min(2.5, Math.max(0.5, v)) * 10) / 10;
+    savePref('uiScale', String(uiScale));
+    flash(`text size ${Math.round(uiScale * 100)}%`);
+  }
+
+  // Replace text[from,to) in the editor, keeping native undo when possible.
+  function replaceRange(from: number, to: number, text: string, caret: number) {
+    if (!bodyEl) return;
+    bodyEl.focus();
+    bodyEl.setSelectionRange(from, to);
+    // execCommand keeps the textarea undo stack and fires `input` (bind:value + onEdit).
+    if (!document.execCommand('insertText', false, text)) {
+      draftBody = draftBody.slice(0, from) + text + draftBody.slice(to);
+      onEdit();
+    }
+    tick().then(() => bodyEl?.setSelectionRange(caret, caret));
+  }
+
+  // The line around the caret: start, end, and caret column.
+  function caretLine() {
+    if (!bodyEl || bodyEl.selectionStart !== bodyEl.selectionEnd) return null;
+    const pos = bodyEl.selectionStart;
+    const v = bodyEl.value;
+    const start = v.lastIndexOf('\n', pos - 1) + 1;
+    let end = v.indexOf('\n', pos);
+    if (end < 0) end = v.length;
+    return { pos, start, end, text: v.slice(start, end), col: pos - start };
+  }
+
+  function taskifyLine() {
+    const l = caretLine();
+    if (!l) return;
+    const out = makeTask(l.text);
+    replaceRange(l.start, l.end, out, l.start + out.length);
+  }
+
+  // Re-check whether the caret sits after a "/word" and show/hide the menu.
+  function updateSlash() {
+    const l = caretLine();
+    const q = l ? slashQuery(l.text.slice(0, l.col)) : null;
+    if (!bodyEl || q === null || !matchSlash(q, allSlash).length) {
+      slashOpen = false;
+      return;
+    }
+    if (!slashOpen || q !== slashQ) slashSel = 0;
+    slashQ = q;
+    // Anchor the menu at the "/" so it doesn't slide while typing.
+    const c = caretXY(bodyEl, l!.pos - q.length - 1);
+    const top = bodyEl.offsetTop + c.y - bodyEl.scrollTop;
+    const paneH = bodyEl.offsetParent ? (bodyEl.offsetParent as HTMLElement).clientHeight : bodyEl.clientHeight;
+    const above = top + c.lineHeight + 200 > paneH && top > 200;
+    slashPos = {
+      left: Math.max(4, Math.min(bodyEl.offsetLeft + c.x - bodyEl.scrollLeft, bodyEl.offsetLeft + bodyEl.clientWidth - 260)),
+      top: above ? top : top + c.lineHeight,
+      above,
+    };
+    slashOpen = true;
+  }
+
+  async function acceptSlash(cmd: SlashCommand | undefined) {
+    slashOpen = false;
+    const l = caretLine();
+    if (!cmd || !l) return;
+    if (!cmd.user) {
+      const r = expandSlash(l.text, l.col, cmd);
+      if (r) replaceRange(l.start, l.end, r.line, l.start + r.col);
+      return;
+    }
+    const tok = slashToken(l.text, l.col);
+    if (!tok || !current) return;
+    const note = current;
+    try {
+      const res = await api.RunSlash(cmd.name, {
+        line: tok.before + tok.after,
+        before: tok.before,
+        after: tok.after,
+        body: draftBody,
+        note: { kind: note.kind, id: note.id, title: draftTitle, tags: parseTags(draftTags), path: '' },
+        notes_dir: '',
+        config_dir: '',
+      });
+      // The script ran asynchronously: only apply it if nothing moved underneath.
+      if (!current || keyOf(current) !== keyOf(note) || !bodyEl || bodyEl.value.slice(l.start, l.end) !== l.text) {
+        flash(`/${cmd.name}: the line changed while it ran; skipped`, true);
+        return;
+      }
+      const r = applyUserResult(l.text, l.col, res);
+      if (r) replaceRange(l.start, l.end, r.line, l.start + r.col);
+    } catch (e) {
+      flash(`/${cmd.name}: ${errMsg(e)}`, true);
+    }
+  }
+
+  // Keys while the slash menu is open. Returns true when handled.
+  function slashKey(e: KeyboardEvent): boolean {
+    if (!slashOpen) return false;
+    const mod = e.ctrlKey || e.metaKey;
+    const n = slashItems.length;
+    const k = e.key.toLowerCase();
+    if (e.key === 'ArrowDown' || (mod && k === 'n')) {
+      slashSel = (slashSel + 1) % n;
+    } else if (e.key === 'ArrowUp' || (mod && k === 'p')) {
+      slashSel = (slashSel - 1 + n) % n;
+    } else if (e.key === 'Enter' || e.key === 'Tab') {
+      acceptSlash(slashItems[slashSel]);
+    } else if (e.key === 'Escape') {
+      slashOpen = false;
+    } else if (e.key === ' ' && !mod) {
+      // Space expands only an exact name ("/today "); otherwise it's just a space.
+      const exact = allSlash.find((c) => c.name === slashQ);
+      if (!exact) { slashOpen = false; return false; }
+      acceptSlash(exact);
+    } else {
+      return false;
+    }
+    e.preventDefault();
+    e.stopPropagation();
+    return true;
+  }
+
+  function onPreviewClick(e: MouseEvent) {
+    const el = e.target as HTMLElement;
+    if (!(el instanceof HTMLInputElement) || !el.classList.contains('task')) return;
+    e.preventDefault();
+    const next = toggleTask(draftBody, Number(el.dataset.task));
+    if (next === null) return;
+    draftBody = next;
+    onEdit();
+  }
+
   function onBodyKey(e: KeyboardEvent) {
+    if (slashKey(e)) return;
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !e.shiftKey && !e.altKey) {
+      e.preventDefault();
+      e.stopPropagation();
+      taskifyLine();
+      return;
+    }
     if (e.key === 'Tab' && bodyEl) {
       e.preventDefault();
       const { selectionStart: s, selectionEnd: end } = bodyEl;
@@ -405,16 +804,23 @@
 
   onMount(() => {
     loadInfo().catch((e) => flash(errMsg(e), true));
-    refreshList();
+    refreshList().then(openStartPage);
+    loadUserSlash();
     window.addEventListener('focus', onFocus);
+    // Ctrl+Shift+Z is bound in main.go (Wails swallows it on Linux).
+    window.addEventListener('katnotes:toggle-zoom', toggleZoom);
     window.addEventListener('beforeunload', () => { if (dirty) save(); });
-    return () => window.removeEventListener('focus', onFocus);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('katnotes:toggle-zoom', toggleZoom);
+    };
   });
 </script>
 
 <svelte:window onkeydown={onKey} />
 
-<div class="app">
+<div class="app" class:zoomed>
+  {#if !zoomed}
   <aside class="sidebar">
     <div class="brand">
       <span class="logo">🐾</span> KatNotes
@@ -493,10 +899,12 @@
 
     <footer class="dir" title={notesDir}>{notesDir}</footer>
   </aside>
+  {/if}
 
   <main class="main">
     {#if current}
-      <header class="note-head">
+      <header class="note-head" class:bare={zoomed}>
+        {#if !zoomed}
         <input
           class="title-input"
           bind:value={draftTitle}
@@ -521,6 +929,7 @@
           </span>
           <button class="danger" onclick={() => (deleteOpen = true)} title="Delete note">Delete</button>
         </div>
+        {/if}
         {#if conflict}
           <div class="conflict">
             This note changed on disk (CLI, TUI or another editor).
@@ -532,17 +941,49 @@
 
       <section class="panes {viewMode}">
         {#if viewMode !== 'preview'}
+          <div class="editor-col">
+          <details class="frontmatter" open={fmOpen} ontoggle={(e) => { fmOpen = (e.currentTarget as HTMLDetailsElement).open; savePref('fmOpen', fmOpen ? '1' : '0'); }}>
+            <summary>Frontmatter <span class="fm-count">{fmRows.length} fields</span></summary>
+            <table>
+              <tbody>
+                {#each fmRows as [k, v] (k)}
+                  <tr><th scope="row">{k}</th><td class:empty-val={!v}>{v || '—'}</td></tr>
+                {/each}
+              </tbody>
+            </table>
+          </details>
           <textarea
             class="editor"
             bind:this={bodyEl}
             bind:value={draftBody}
-            oninput={onEdit}
+            oninput={() => { onEdit(); updateSlash(); }}
             onkeydown={onBodyKey}
+            onkeyup={(e) => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) updateSlash(); }}
+            onclick={updateSlash}
+            onblur={() => (slashOpen = false)}
+            onscroll={() => { if (slashOpen) updateSlash(); }}
             spellcheck="true"
           ></textarea>
+          {#if slashOpen && slashItems.length}
+            <ul class="slash-menu" class:above={slashPos.above} style:left="{slashPos.left}px" style:top="{slashPos.top}px" role="listbox">
+              {#each slashItems as c, i (c.name)}
+                <li role="option" aria-selected={i === slashSel}>
+                  <button class="slash-item" class:active={i === slashSel} tabindex="-1"
+                    onmousedown={(e) => { e.preventDefault(); slashSel = i; acceptSlash(c); }}
+                    onmouseenter={() => (slashSel = i)}>
+                    <span class="cmd-name">/{c.name}</span>
+                    <span class="cmd-desc">{c.desc()}</span>
+                    {#if c.user}<span class="lua-badge">lua</span>{/if}
+                  </button>
+                </li>
+              {/each}
+            </ul>
+          {/if}
+          </div>
         {/if}
         {#if viewMode !== 'edit'}
-          <article class="preview">{@html preview}</article>
+          <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
+          <article class="preview" onclick={onPreviewClick}>{@html preview}</article>
         {/if}
       </section>
     {:else}
@@ -555,6 +996,9 @@
         </div>
         <p class="keys">Ctrl+N new · Ctrl+J today · Ctrl+K search · Ctrl+S save · Ctrl+E toggle preview</p>
       </div>
+    {/if}
+    {#if zoomed}
+      <button class="unzoom" title="Exit zoom ({modLabel}+Shift+Z)" onclick={() => (zoomed = false)}>⤡</button>
     {/if}
     {#if status}
       <div class="status" class:err={statusErr}>
@@ -596,6 +1040,42 @@
   </div>
 {/if}
 
+{#if cmdOpen}
+  <div class="backdrop palette-backdrop" role="presentation" onclick={closePalette}>
+    <div class="modal palette" role="dialog" aria-label="Command palette" tabindex="-1" onclick={(e) => e.stopPropagation()} onkeydown={() => {}}>
+      <div class="cmd-line">
+        <span class="cmd-prompt">:</span>
+        <div class="cmd-field">
+          <span class="cmd-ghost" aria-hidden="true"><span class="cmd-typed">{cmdInput}</span>{cmdGhost}</span>
+          <input
+            bind:this={cmdEl}
+            bind:value={cmdInput}
+            oninput={() => (cmdSel = 0)}
+            onkeydown={onCmdKey}
+            spellcheck="false"
+            autocomplete="off"
+            aria-label="Command"
+          />
+        </div>
+      </div>
+      <ul class="cmd-list">
+        {#each cmdMatches as c, i (c.name)}
+          <li>
+            <button class="cmd-item" class:active={i === cmdSel} onmouseenter={() => (cmdSel = i)} onclick={() => { cmdSel = i; cmdInput = c.name; runCommand(); }}>
+              <span class="cmd-name">{c.name}</span>
+              <span class="cmd-desc">{c.desc}</span>
+              {#if c.keys}<kbd>{c.keys}</kbd>{/if}
+            </button>
+          </li>
+        {:else}
+          <li class="empty">No matching command.</li>
+        {/each}
+      </ul>
+      <div class="cmd-foot hint">Tab complete · ↑↓ select · Enter run · Esc close</div>
+    </div>
+  </div>
+{/if}
+
 {#if helpOpen}
   <div class="backdrop" role="presentation" onclick={() => (helpOpen = false)}>
     <div class="modal help" role="dialog" aria-label="Keyboard help" tabindex="-1" onclick={(e) => e.stopPropagation()} onkeydown={() => {}}>
@@ -616,6 +1096,13 @@
             {/each}
           </dl>
         {/each}
+        <h3>Command palette</h3>
+        <dl>
+          {#each commands as c}
+            <dt><kbd>:{c.name}</kbd></dt>
+            <dd>{c.desc}</dd>
+          {/each}
+        </dl>
       </div>
       <footer class="help-foot">
         <span class="hint">Esc or ? to close</span>
@@ -637,6 +1124,43 @@
       </label>
       <label>External editor (CLI/TUI)
         <input value={cfg.editor} placeholder="$VISUAL / $EDITOR" onchange={(e) => saveSetting('editor', (e.target as HTMLInputElement).value)} />
+      </label>
+      <label>Open on launch
+        <div class="row">
+          <select value={startMode} onchange={(e) => setStartMode((e.target as HTMLSelectElement).value)}>
+            <option value="none">Welcome screen</option>
+            <option value="last">Last opened note</option>
+            <option value="today">Today's journal entry</option>
+            <option value="note">A specific note…</option>
+          </select>
+          {#if startMode === 'note'}
+            <select value={cfg.start_page} onchange={(e) => saveSetting('start_page', (e.target as HTMLSelectElement).value)}>
+              {#if current && current.kind === 'journal'}
+                <option value={keyOf(current)}>{current.title} (journal)</option>
+              {/if}
+              {#if !startPages.some((p) => keyOf(p) === cfg?.start_page) && !(current && keyOf(current) === cfg.start_page)}
+                <option value={cfg.start_page}>{cfg.start_page}</option>
+              {/if}
+              {#each startPages as p (keyOf(p))}
+                <option value={keyOf(p)}>{p.title}</option>
+              {/each}
+            </select>
+          {/if}
+        </div>
+      </label>
+      <div class="row font-row">
+        <label>Body font
+          <input value={cfg.font?.body ?? ''} placeholder="system default" onchange={(e) => saveSetting('font.body', (e.target as HTMLInputElement).value)} />
+        </label>
+        <label>Mono font
+          <input value={cfg.font?.mono ?? ''} placeholder="system monospace" onchange={(e) => saveSetting('font.mono', (e.target as HTMLInputElement).value)} />
+        </label>
+        <label class="size">Size (px)
+          <input type="number" min="8" max="40" value={cfg.font?.size ?? 14} onchange={(e) => saveSetting('font.size', (e.target as HTMLInputElement).value)} />
+        </label>
+      </div>
+      <label>Open notes with (GUI)
+        <input value={cfg.open_with} placeholder="system default (xdg-open)" onchange={(e) => saveSetting('open_with', (e.target as HTMLInputElement).value)} />
       </label>
       <label>Journal title date format (Go layout)
         <input value={cfg.date_format} onchange={(e) => saveSetting('date_format', (e.target as HTMLInputElement).value)} />

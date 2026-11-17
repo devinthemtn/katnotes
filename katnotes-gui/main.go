@@ -70,6 +70,13 @@ func main() {
 		MinHeight:        480,
 		BackgroundColour: application.NewRGB(24, 24, 32),
 		URL:              "/",
+		// Wails on Linux grabs Ctrl+Shift+Z (redo) before the page sees it,
+		// so zoom has to be bound here and handed to the frontend.
+		KeyBindings: map[string]func(window application.Window){
+			"CmdOrCtrl+Shift+Z": func(w application.Window) {
+				w.ExecJS(`window.dispatchEvent(new CustomEvent("katnotes:toggle-zoom"))`)
+			},
+		},
 	})
 
 	if err := app.Run(); err != nil {
