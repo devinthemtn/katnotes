@@ -36,9 +36,10 @@ const (
 	tabPages tab = iota
 	tabJournal
 	tabTags
+	tabTasks
 )
 
-var tabNames = []string{"Pages", "Journal", "Tags"}
+var tabNames = []string{"Pages", "Journal", "Tags", "Tasks"}
 
 type mode int
 
@@ -86,6 +87,85 @@ func (i tagItem) Title() string       { return "#" + i.t.Tag }
 func (i tagItem) Description() string { return fmt.Sprintf("%d note(s)", i.t.Count) }
 func (i tagItem) FilterValue() string { return i.t.Tag }
 
+// taskNoteItem is a note that contains tasks (Tasks tab, notes view).
+type taskNoteItem struct{ nt notes.NoteTasks }
+
+func (i taskNoteItem) Title() string { return i.nt.Note.Title }
+func (i taskNoteItem) Description() string {
+	parts := []string{fmt.Sprintf("%d open · %d done", i.nt.Open, i.nt.Done)}
+	if t, ok := firstOpen(i.nt.Tasks); ok {
+		parts = append(parts, "☐ "+t.Text)
+	} else {
+		parts = append(parts, string(i.nt.Note.Kind)+"/"+i.nt.Note.ID)
+	}
+	return strings.Join(parts, " · ")
+}
+func (i taskNoteItem) FilterValue() string { return i.nt.Note.Title }
+
+// taskItem is one task line (Tasks tab, all-tasks view).
+type taskItem struct {
+	n notes.Note
+	t notes.Task
+}
+
+func (i taskItem) Title() string {
+	box := "☐ "
+	if i.t.Done {
+		box = "☑ "
+	}
+	text := i.t.Text
+	if text == "" {
+		text = "(empty task)"
+	}
+	return strings.Repeat(" ", min(i.t.Indent, 8)) + box + text
+}
+func (i taskItem) Description() string {
+	return fmt.Sprintf("%s · %s/%s:%d", i.n.Title, i.n.Kind, i.n.ID, i.t.Line+1)
+}
+func (i taskItem) FilterValue() string { return i.t.Text }
+
+func firstOpen(ts []notes.Task) (notes.Task, bool) {
+	for _, t := range ts {
+		if !t.Done {
+			return t, true
+		}
+	}
+	return notes.Task{}, false
+}
+
+// itemKey identifies a list item across reloads.
+func itemKey(it list.Item) string {
+	switch v := it.(type) {
+	case noteItem:
+		return key(&v.n)
+	case taskNoteItem:
+		return key(&v.nt.Note)
+	case taskItem:
+		return fmt.Sprintf("%s#%d", key(&v.n), v.t.Line)
+	}
+	return ""
+}
+
+// taskMatches applies the tag filter and search to a note with tasks.
+func (m *model) taskMatches(nt notes.NoteTasks, t *notes.Task) bool {
+	if m.tagFilter != "" && !nt.Note.HasTag(m.tagFilter) {
+		return false
+	}
+	q := strings.ToLower(m.query)
+	if q == "" || strings.Contains(strings.ToLower(nt.Note.Title), q) {
+		return true
+	}
+	if t != nil {
+		return strings.Contains(strings.ToLower(t.Text), q)
+	}
+	for _, x := range nt.Tasks {
+		if strings.Contains(strings.ToLower(x.Text), q) {
+			return true
+		}
+	}
+	return false
+}
+
 // messages
 
 type editedMsg struct {
@@ -123,6 +203,8 @@ type model struct {
 
 	tagFilter string
 	query     string
+	allTasks  bool                   // Tasks tab: list every task instead of notes with tasks
+	showDone  bool                   // Tasks tab, all-tasks view: include checked tasks
 	results   map[string]notes.Match // kind/id -> match while searching
 
 	status  string
@@ -156,13 +238,27 @@ func key(n *notes.Note) string { return string(n.Kind) + "/" + n.ID }
 
 // reload rebuilds the list for the current tab, filters and search.
 func (m *model) reload() {
-	var sel string
-	if it, ok := m.list.SelectedItem().(noteItem); ok {
-		sel = key(&it.n)
-	}
+	sel := itemKey(m.list.SelectedItem())
 	var items []list.Item
 	var err error
 	switch m.tab {
+	case tabTasks:
+		var all []notes.NoteTasks
+		all, err = m.app.Store.Tasks("")
+		for _, nt := range all {
+			if !m.allTasks {
+				if m.taskMatches(nt, nil) {
+					items = append(items, taskNoteItem{nt})
+				}
+				continue
+			}
+			for _, t := range nt.Tasks {
+				if (t.Done && !m.showDone) || !m.taskMatches(nt, &t) {
+					continue
+				}
+				items = append(items, taskItem{n: nt.Note, t: t})
+			}
+		}
 	case tabTags:
 		var tags []notes.TagCount
 		tags, err = m.app.Store.SortedTags()
@@ -199,7 +295,7 @@ func (m *model) reload() {
 	m.list.SetItems(items)
 	if sel != "" {
 		for i, it := range items {
-			if ni, ok := it.(noteItem); ok && key(&ni.n) == sel {
+			if itemKey(it) == sel {
 				m.list.Select(i)
 				break
 			}
@@ -215,7 +311,7 @@ func (m *model) reload() {
 // selectKey moves the cursor to the note with key k, if listed.
 func (m *model) selectKey(k string) {
 	for i, it := range m.list.Items() {
-		if ni, ok := it.(noteItem); ok && key(&ni.n) == k {
+		if n := noteOf(it); n != nil && key(n) == k {
 			m.list.Select(i)
 			break
 		}
@@ -226,12 +322,22 @@ func (m *model) selectKey(k string) {
 func (m *model) setErr(err error)   { m.status, m.isErr = err.Error(), true }
 func (m *model) setStatus(s string) { m.status, m.isErr = s, false }
 
-func (m *model) selected() *notes.Note {
-	if it, ok := m.list.SelectedItem().(noteItem); ok {
-		n := it.n
-		return &n
+func (m *model) selected() *notes.Note { return noteOf(m.list.SelectedItem()) }
+
+// noteOf returns a copy of the note behind a list item, if any.
+func noteOf(it list.Item) *notes.Note {
+	var n notes.Note
+	switch v := it.(type) {
+	case noteItem:
+		n = v.n
+	case taskNoteItem:
+		n = v.nt.Note
+	case taskItem:
+		n = v.n
+	default:
+		return nil
 	}
-	return nil
+	return &n
 }
 
 func (m *model) layout() {
@@ -300,7 +406,14 @@ func (m *model) updatePreview() {
 		b.WriteString("\n  enter: filter Pages/Journal by this tag\n")
 		content = b.String()
 	} else {
-		content = statusStyle.Render("\n  Nothing here yet. Press n to create a note, T for today's journal.")
+		msg := "\n  Nothing here yet. Press n to create a note, T for today's journal."
+		if m.tab == tabTasks {
+			msg = "\n  No tasks found. Add \"- [ ] something\" to a note."
+			if m.allTasks && !m.showDone {
+				msg += "\n  (done tasks are hidden: press a to show them)"
+			}
+		}
+		content = statusStyle.Render(msg)
 	}
 	m.preview = k
 	m.view.SetContent(content)
@@ -315,9 +428,12 @@ func (m *model) startInput(p inputPurpose, prompt, value string) tea.Cmd {
 	return m.input.Focus()
 }
 
-func (m *model) editCmd(n *notes.Note) tea.Cmd {
+func (m *model) editCmd(n *notes.Note) tea.Cmd { return m.editCmdAt(n, 0) }
+
+// editCmdAt opens n in the editor at 1-based file line `line` (0 = top).
+func (m *model) editCmdAt(n *notes.Note, line int) tea.Cmd {
 	before := m.app.Store.ModTime(n.Kind, n.ID)
-	c, err := editor.Command(m.app.Cfg.Editor, n.Path)
+	c, err := editor.CommandAt(m.app.Cfg.Editor, n.Path, line)
 	if err != nil {
 		m.setErr(err)
 		return nil
@@ -370,16 +486,16 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.help.GotoTop()
 		return m, nil
 	case "tab", "right", "l":
-		m.tab = (m.tab + 1) % 3
+		m.tab = (m.tab + 1) % tab(len(tabNames))
 		m.list.Select(0)
 		m.reload()
 		return m, nil
 	case "shift+tab", "left", "h":
-		m.tab = (m.tab + 2) % 3
+		m.tab = (m.tab + tab(len(tabNames)) - 1) % tab(len(tabNames))
 		m.list.Select(0)
 		m.reload()
 		return m, nil
-	case "1", "2", "3":
+	case "1", "2", "3", "4":
 		m.tab = tab(msg.String()[0] - '1')
 		m.list.Select(0)
 		m.reload()
@@ -422,7 +538,55 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.mode, m.confirm = modeConfirm, n
 		}
 		return m, nil
+	case "v":
+		if m.tab == tabTasks {
+			m.allTasks = !m.allTasks
+			m.list.Select(0)
+			if m.allTasks {
+				m.setStatus("all tasks (v: notes with tasks, a: show done)")
+			} else {
+				m.setStatus("notes with tasks (v: all tasks)")
+			}
+			m.reload()
+		}
+		return m, nil
+	case "a":
+		if m.tab == tabTasks && m.allTasks {
+			m.showDone = !m.showDone
+			m.reload()
+			if m.showDone {
+				m.setStatus("showing done tasks")
+			} else {
+				m.setStatus("hiding done tasks")
+			}
+		}
+		return m, nil
+	case "x", " ":
+		if it, ok := m.list.SelectedItem().(taskItem); ok {
+			n, err := m.app.Store.SetTask(it.n.Kind, it.n.ID, it.t.Line, !it.t.Done)
+			if err != nil {
+				m.setErr(err)
+			} else if it.t.Done {
+				m.setStatus("unchecked in " + key(n))
+			} else {
+				m.setStatus("checked in " + key(n))
+			}
+			m.reload()
+		}
+		return m, nil
 	case "e", "enter":
+		switch it := m.list.SelectedItem().(type) {
+		case taskItem:
+			n := it.n
+			return m, m.editCmdAt(&n, m.app.Store.FileLine(n.Kind, n.ID, it.t.Line))
+		case taskNoteItem:
+			n := it.nt.Note
+			line := 0
+			if t, ok := firstOpen(it.nt.Tasks); ok {
+				line = m.app.Store.FileLine(n.Kind, n.ID, t.Line)
+			}
+			return m, m.editCmdAt(&n, line)
+		}
 		if it, ok := m.list.SelectedItem().(tagItem); ok {
 			m.tagFilter = it.t.Tag
 			m.tab = tabPages
@@ -595,6 +759,13 @@ func (m model) View() string {
 		return m.helpView()
 	}
 	help := statusStyle.Render("? help · n new · enter/e edit · r rename · d delete · T today · / search · t tag · tab switch · J/K scroll · q quit")
+	if m.tab == tabTasks {
+		view := "v all tasks"
+		if m.allTasks {
+			view = "v notes · a done · x check"
+		}
+		help = statusStyle.Render("? help · enter edit at task · " + view + " · / search · t tag · tab switch · q quit")
+	}
 	return lipgloss.JoinVertical(lipgloss.Left, header, filterLine, body, bottom, help)
 }
 
@@ -618,7 +789,7 @@ var helpSections = []struct {
 		{"↑/↓  j/k", "move selection"},
 		{"tab  →  l", "next tab"},
 		{"shift+tab ← h", "previous tab"},
-		{"1 2 3", "Pages / Journal / Tags"},
+		{"1 2 3 4", "Pages / Journal / Tags / Tasks"},
 		{"J / K", "scroll preview (also pgdn/pgup, ctrl+d/u)"},
 	}},
 	{"Notes", []helpEntry{
@@ -628,6 +799,12 @@ var helpSections = []struct {
 		{"d / delete", "delete (asks to confirm)"},
 		{"T", "open today's journal"},
 		{"R", "reload from disk"},
+	}},
+	{"Tasks tab", []helpEntry{
+		{"v", "switch: notes with tasks / all tasks"},
+		{"enter / e", "edit the note at the (first open) task line"},
+		{"x / space", "check or uncheck the selected task"},
+		{"a", "all-tasks view: show or hide done tasks"},
 	}},
 	{"Finding", []helpEntry{
 		{"/", "full-text search"},

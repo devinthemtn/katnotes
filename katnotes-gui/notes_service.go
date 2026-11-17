@@ -330,3 +330,28 @@ func (s *NotesService) RunSlash(name string, ctx luacmd.Context) (luacmd.Result,
 	}
 	return luacmd.Run(dir, name, ctx)
 }
+
+// Tasks lists every note that contains tasks, with its tasks (bodies omitted).
+func (s *NotesService) Tasks() ([]notes.NoteTasks, error) {
+	st := s.lock()
+	defer s.mu.Unlock()
+	ts, err := st.Tasks("")
+	for i := range ts {
+		ts[i].Note.Body = ""
+	}
+	if ts == nil {
+		ts = []notes.NoteTasks{}
+	}
+	return ts, err
+}
+
+// SetTask checks or unchecks the task on a note's body line and saves it.
+func (s *NotesService) SetTask(kind, id string, line int, done bool) (*notes.Note, error) {
+	st := s.lock()
+	defer s.mu.Unlock()
+	k, err := notes.ParseKind(kind)
+	if err != nil {
+		return nil, err
+	}
+	return st.SetTask(k, id, line, done)
+}

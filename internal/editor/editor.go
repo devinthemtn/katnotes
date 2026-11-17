@@ -3,8 +3,10 @@ package editor
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -43,4 +45,31 @@ func Open(configured, path string) error {
 		return err
 	}
 	return cmd.Run()
+}
+
+// CommandAt is like Command but asks the editor to open at a 1-based line
+// when it is one that understands a line argument. Unknown editors just open
+// the file.
+func CommandAt(configured, path string, line int) (*exec.Cmd, error) {
+	argv, err := Resolve(configured)
+	if err != nil {
+		return nil, err
+	}
+	args := append([]string{}, argv[1:]...)
+	if line > 0 {
+		switch strings.TrimSuffix(filepath.Base(argv[0]), ".exe") {
+		case "vi", "vim", "nvim", "gvim", "nano", "micro", "emacs", "emacsclient", "kak", "joe", "mg", "ne", "jed":
+			args = append(args, fmt.Sprintf("+%d", line))
+		case "hx", "helix", "subl", "zed":
+			path = fmt.Sprintf("%s:%d", path, line)
+		case "code", "codium", "code-insiders", "cursor":
+			args = append(args, "-g")
+			path = fmt.Sprintf("%s:%d", path, line)
+		case "kate":
+			args = append(args, "-l", fmt.Sprint(line))
+		}
+	}
+	cmd := exec.Command(argv[0], append(args, path)...)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	return cmd, nil
 }

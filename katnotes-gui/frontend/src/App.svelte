@@ -2,20 +2,25 @@
   import { onMount, tick } from 'svelte';
   import { marked } from 'marked';
   import DOMPurify from 'dompurify';
-  import { checkboxHTML, decorateTasks, toggleTask, makeTask } from './tasks';
+  import { checkboxHTML, decorateTasks, toggleTask, makeTask, setTaskLine } from './tasks';
   import { SLASH, matchSlash, mergeSlash, slashQuery, slashToken, expandSlash, applyUserResult, caretXY, rank, type SlashCommand } from './slash';
   import { NotesService as api } from '../bindings/github.com/devinthemtn/katnotes/katnotes-gui';
-  import type { Note, Match, TagCount } from '../bindings/github.com/devinthemtn/katnotes/internal/notes';
+  import type { Note, Match, TagCount, NoteTasks, Task } from '../bindings/github.com/devinthemtn/katnotes/internal/notes';
   import type { Config } from '../bindings/github.com/devinthemtn/katnotes/internal/config';
 
   marked.use({ renderer: { checkbox: checkboxHTML } });
 
-  type Tab = 'page' | 'journal' | 'tags';
+  type Tab = 'page' | 'journal' | 'tags' | 'tasks';
   type ViewMode = 'edit' | 'split' | 'preview';
 
   let tab: Tab = $state('page');
   let items: Note[] = $state([]);
   let tags: TagCount[] = $state([]);
+  // Notes that contain tasks (Tasks tab and the all-tasks view).
+  let taskNotes: NoteTasks[] = $state([]);
+  let mainView: 'note' | 'tasks' = $state('note');
+  let taskFilter = $state(loadPref('taskFilter', 'open') as 'open' | 'done' | 'all');
+  let taskQuery = $state('');
   let matches: Record<string, Match> = $state({});
   let tagFilter = $state('');
   let query = $state('');
@@ -51,7 +56,8 @@
 
   // editor slash menu
   // frontmatter panel above the editor
-  let fmOpen = $state(loadPref('fmOpen', '1') === '1');
+  // Starts from config.toml's frontmatter_collapsed; toggling lasts for the session.
+  let fmOpen = $state(true);
   function fmValue(v: unknown): string {
     if (v === null || v === undefined) return '';
     if (Array.isArray(v)) return v.map((x) => fmValue(x)).join(', ');
@@ -128,6 +134,7 @@
       [`${modLabel}+E`, 'Cycle Edit → Split → Preview'],
       [`${modLabel}+= / ${modLabel}+-`, 'Make text larger / smaller'],
       [`${modLabel}+0`, 'Reset text size'],
+      [`${modLabel}+Shift+T`, 'All tasks from every note (Esc to go back)'],
       [`${modLabel}+Shift+O`, 'Open the note in the default app (Settings: open with)'],
       [`${modLabel}+Shift+P / ${modLabel}+Shift+:`, 'Command palette'],
       [`${modLabel}+Shift+Z`, 'Zoom: hide the sidebar and top bar (again to exit)'],
@@ -179,6 +186,10 @@
 
   async function refreshList() {
     try {
+      if (tab === 'tasks' || mainView === 'tasks') {
+        taskNotes = (await api.Tasks()) ?? [];
+        if (tab === 'tasks') return;
+      }
       if (tab === 'tags') {
         tags = (await api.Tags()) ?? [];
         return;
@@ -216,6 +227,7 @@
   }
 
   async function open(kind: string, id: string) {
+    mainView = 'note';
     if (current && keyOf(current) === `${kind}/${id}`) return;
     await flushSave();
     try {
@@ -311,7 +323,8 @@
     try {
       const n = await api.Create(kind, newTitle.trim(), tagFilter ? [tagFilter] : []);
       newOpen = false;
-      if (tab === 'tags') tab = 'page';
+      if (tab === 'tags' || tab === 'tasks') tab = 'page';
+      mainView = 'note';
       await refreshList();
       if (n) {
         setCurrent(n);
@@ -329,6 +342,7 @@
     try {
       const n = await api.Today();
       tab = 'journal';
+      mainView = 'note';
       await refreshList();
       if (n) {
         setCurrent(n);
@@ -365,7 +379,7 @@
 
   async function pickTag(t: string) {
     tagFilter = t;
-    if (tab === 'tags') tab = 'page';
+    if (tab === 'tags' || tab === 'tasks') tab = 'page';
     await refreshList();
   }
 
@@ -397,6 +411,7 @@
     try {
       const c = await api.ReloadConfig();
       applyFonts(c);
+      fmOpen = !c.frontmatter_collapsed;
       if (settingsOpen) cfg = c;
       await loadUserSlash(true);
       await loadInfo();
@@ -413,6 +428,7 @@
     try {
       const c = await api.GetConfig();
       applyFonts(c);
+      fmOpen = !c.frontmatter_collapsed;
       start = c.start_page || 'none';
     } catch { return; }
     if (start === 'today') return openToday();
@@ -531,6 +547,7 @@
     { name: 'zoom', desc: 'Toggle focus mode (hide sidebar and top bar)', keys: `${modLabel}+Shift+Z`, run: toggleZoom },
     { name: 'open', desc: 'Open the note in the default editor', keys: `${modLabel}+Shift+O`, run: openExternal },
     { name: 'terminal', desc: "Open a terminal in the note's folder", run: openTerminal },
+    { name: 'tasks', desc: 'Show all tasks from every note', keys: `${modLabel}+Shift+T`, run: showTasks },
     { name: 'reload', desc: 'Reload config.toml and Lua / commands', run: reloadConfig },
   ];
 
@@ -600,6 +617,94 @@
     }
   }
 
+  // ---- tasks across notes ----
+  function taskVisible(t: Task): boolean {
+    return taskFilter === 'all' || (taskFilter === 'done' ? t.done : !t.done);
+  }
+  function noteMatches(nt: NoteTasks, q: string): boolean {
+    if (tagFilter && !(nt.note.tags ?? []).includes(tagFilter)) return false;
+    q = q.trim().toLowerCase();
+    if (!q) return true;
+    return nt.note.title.toLowerCase().includes(q) || (nt.tasks ?? []).some((t) => t.text.toLowerCase().includes(q));
+  }
+  // Sidebar Tasks tab: notes with tasks, filtered by the sidebar search.
+  let taskSidebar = $derived(taskNotes.filter((nt) => noteMatches(nt, query)));
+  // All-tasks view: groups with their visible tasks.
+  let taskGroups = $derived.by(() => {
+    const q = taskQuery.trim().toLowerCase();
+    return taskNotes
+      .filter((nt) => noteMatches(nt, ''))
+      .map((nt) => {
+        const titleHit = !!q && nt.note.title.toLowerCase().includes(q);
+        const tasks = (nt.tasks ?? []).filter((t) => taskVisible(t) && (!q || titleHit || t.text.toLowerCase().includes(q)));
+        return { nt, tasks };
+      })
+      .filter((g) => g.tasks.length);
+  });
+  let taskCount = $derived(taskGroups.reduce((n, g) => n + g.tasks.length, 0));
+
+  function setTaskFilter(f: 'open' | 'done' | 'all') {
+    taskFilter = f;
+    savePref('taskFilter', f);
+  }
+
+  async function showTasks() {
+    slashOpen = false;
+    mainView = 'tasks';
+    taskNotes = (await api.Tasks().catch(() => taskNotes)) ?? [];
+  }
+
+  function toggleTasksView() {
+    if (mainView === 'tasks') mainView = 'note';
+    else showTasks();
+  }
+
+  function recount(nt: NoteTasks) {
+    const ts = nt.tasks ?? [];
+    nt.done = ts.filter((t) => t.done).length;
+    nt.open = ts.length - nt.done;
+  }
+
+  async function toggleTaskIn(nt: NoteTasks, t: Task) {
+    const done = !t.done;
+    if (current && keyOf(current) === keyOf(nt.note)) {
+      // The note is open in the editor: change the draft so unsaved text isn't clobbered.
+      const next = setTaskLine(draftBody, t.line, done, t.text);
+      if (next === null) {
+        flash('that task moved in the editor; list refreshed', true);
+        await refreshList();
+        return;
+      }
+      draftBody = next;
+      onEdit();
+      t.done = done;
+      recount(nt);
+      return;
+    }
+    try {
+      await api.SetTask(nt.note.kind, nt.note.id, t.line, done);
+      t.done = done;
+      recount(nt);
+    } catch (e) {
+      flash(errMsg(e), true);
+    }
+    await refreshList();
+  }
+
+  // Open a note and put the cursor at the start of a body line.
+  async function openAtLine(kind: string, id: string, line: number) {
+    await open(kind, id);
+    await tick();
+    if (!bodyEl) return;
+    const lines = draftBody.split('\n');
+    let off = 0;
+    for (let i = 0; i < Math.min(line, lines.length); i++) off += lines[i].length + 1;
+    bodyEl.focus();
+    bodyEl.setSelectionRange(off, off);
+    const y = caretXY(bodyEl, off).y;
+    bodyEl.scrollTop = Math.max(0, y - bodyEl.clientHeight / 3);
+  }
+
   function isTyping(t: EventTarget | null): boolean {
     const el = t as HTMLElement | null;
     if (!el) return false;
@@ -611,6 +716,9 @@
     if (e.key === 'Escape') {
       if (newOpen || deleteOpen || settingsOpen || helpOpen || cmdOpen) {
         newOpen = deleteOpen = settingsOpen = helpOpen = cmdOpen = false;
+        e.preventDefault();
+      } else if (mainView === 'tasks') {
+        mainView = 'note';
         e.preventDefault();
       }
       return;
@@ -631,6 +739,11 @@
       if (k === 'o') {
         e.preventDefault();
         openExternal();
+        return;
+      }
+      if (k === 't') {
+        e.preventDefault();
+        toggleTasksView();
         return;
       }
     }
@@ -846,6 +959,7 @@
       <button class:active={tab === 'page'} onclick={() => switchTab('page')}>Pages</button>
       <button class:active={tab === 'journal'} onclick={() => switchTab('journal')}>Journal</button>
       <button class:active={tab === 'tags'} onclick={() => switchTab('tags')}>Tags</button>
+      <button class:active={tab === 'tasks'} onclick={() => switchTab('tasks')}>Tasks</button>
     </nav>
 
     {#if tagFilter || query}
@@ -856,8 +970,32 @@
       </div>
     {/if}
 
+    {#if tab === 'tasks'}
+      <button class="all-tasks" class:active={mainView === 'tasks'} onclick={showTasks} title="{modLabel}+Shift+T">☑ Show all tasks</button>
+    {/if}
+
     <ul class="list">
-      {#if tab === 'tags'}
+      {#if tab === 'tasks'}
+        {#each taskSidebar as nt (keyOf(nt.note))}
+          {@const firstOpen = (nt.tasks ?? []).find((t) => !t.done)}
+          <li>
+            <button
+              class="item"
+              class:active={mainView === 'note' && current && keyOf(current) === keyOf(nt.note)}
+              onclick={() => open(nt.note.kind, nt.note.id)}
+            >
+              <span class="title">{nt.note.title}</span>
+              <span class="meta">
+                <span class="task-count" class:none-open={!nt.open}>{nt.open} open · {nt.done} done</span>
+                {nt.note.kind === 'journal' ? nt.note.id : nt.note.kind}
+              </span>
+              {#if firstOpen}<span class="snippet">☐ {firstOpen.text}</span>{/if}
+            </button>
+          </li>
+        {:else}
+          <li class="empty">{query || tagFilter ? 'No matching notes with tasks.' : 'No tasks yet. Type /todo or press Ctrl+Enter on a line.'}</li>
+        {/each}
+      {:else if tab === 'tags'}
         {#each tags as t (t.tag)}
           <li>
             <button class="item" class:active={tagFilter === t.tag} onclick={() => pickTag(t.tag)}>
@@ -902,7 +1040,45 @@
   {/if}
 
   <main class="main">
-    {#if current}
+    {#if mainView === 'tasks'}
+      <section class="tasks-view">
+        <header class="tasks-head">
+          <h2>Tasks <span class="tasks-total">{taskCount}</span></h2>
+          <div class="seg">
+            <button class:active={taskFilter === 'open'} onclick={() => setTaskFilter('open')}>Open</button>
+            <button class:active={taskFilter === 'done'} onclick={() => setTaskFilter('done')}>Done</button>
+            <button class:active={taskFilter === 'all'} onclick={() => setTaskFilter('all')}>All</button>
+          </div>
+          <input class="tasks-filter" type="search" placeholder="Filter tasks…" bind:value={taskQuery} />
+          {#if tagFilter}<span class="chip">#{tagFilter}</span>{/if}
+          <button class="link" onclick={() => (mainView = 'note')} title="Esc">Back to note</button>
+        </header>
+        <div class="tasks-body">
+          {#each taskGroups as g (keyOf(g.nt.note))}
+            <div class="task-group">
+              <button class="task-note" onclick={() => open(g.nt.note.kind, g.nt.note.id)}>
+                {g.nt.note.title}
+                <span class="task-note-meta">{g.nt.note.kind === 'journal' ? g.nt.note.id : 'page'} · {g.nt.open} open · {g.nt.done} done</span>
+              </button>
+              <ul>
+                {#each g.tasks as t (t.line)}
+                  <li class="task-row" class:done={t.done} style:padding-left="{Math.min(t.indent, 16) * 6}px">
+                    <input type="checkbox" class="task" checked={t.done} onclick={(e) => { e.preventDefault(); toggleTaskIn(g.nt, t); }} aria-label="Toggle task" />
+                    <button class="task-text" onclick={() => openAtLine(g.nt.note.kind, g.nt.note.id, t.line)} title="Open at this line">
+                      {t.text || '(empty task)'}
+                    </button>
+                  </li>
+                {/each}
+              </ul>
+            </div>
+          {:else}
+            <p class="empty">
+              {taskNotes.length ? `No ${taskFilter === 'all' ? '' : taskFilter + ' '}tasks${taskQuery || tagFilter ? ' match' : ''}.` : 'No tasks yet. Type /todo or press Ctrl+Enter on a line.'}
+            </p>
+          {/each}
+        </div>
+      </section>
+    {:else if current}
       <header class="note-head" class:bare={zoomed}>
         {#if !zoomed}
         <input
@@ -942,7 +1118,7 @@
       <section class="panes {viewMode}">
         {#if viewMode !== 'preview'}
           <div class="editor-col">
-          <details class="frontmatter" open={fmOpen} ontoggle={(e) => { fmOpen = (e.currentTarget as HTMLDetailsElement).open; savePref('fmOpen', fmOpen ? '1' : '0'); }}>
+          <details class="frontmatter" open={fmOpen} ontoggle={(e) => { fmOpen = (e.currentTarget as HTMLDetailsElement).open; }}>
             <summary>Frontmatter <span class="fm-count">{fmRows.length} fields</span></summary>
             <table>
               <tbody>
@@ -993,6 +1169,7 @@
         <div class="actions">
           <button class="primary" onclick={openNew}>New page</button>
           <button onclick={openToday}>Today's journal</button>
+          <button onclick={showTasks}>Tasks</button>
         </div>
         <p class="keys">Ctrl+N new · Ctrl+J today · Ctrl+K search · Ctrl+S save · Ctrl+E toggle preview</p>
       </div>
@@ -1159,6 +1336,11 @@
           <input type="number" min="8" max="40" value={cfg.font?.size ?? 14} onchange={(e) => saveSetting('font.size', (e.target as HTMLInputElement).value)} />
         </label>
       </div>
+      <label class="check">
+        <input type="checkbox" checked={cfg.frontmatter_collapsed}
+          onchange={async (e) => { const v = (e.target as HTMLInputElement).checked; await saveSetting('frontmatter_collapsed', String(v)); fmOpen = !v; }} />
+        Start with the frontmatter table collapsed
+      </label>
       <label>Open notes with (GUI)
         <input value={cfg.open_with} placeholder="system default (xdg-open)" onchange={(e) => saveSetting('open_with', (e.target as HTMLInputElement).value)} />
       </label>

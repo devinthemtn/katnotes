@@ -97,3 +97,20 @@ export function applyTodo(line: string, col: number): { line: string; col: numbe
   const c = cursor <= r.at ? r.at + r.added : cursor + r.added - r.dropped;
   return { line: r.line, col: Math.min(Math.max(c, r.at + r.added), r.line.length) };
 }
+
+// Set the task on body line `line` to done/undone. If that line isn't the
+// expected task any more (unsaved edits moved it), fall back to the single
+// task whose text matches `text`. Returns null when it can't be found.
+export function setTaskLine(body: string, line: number, done: boolean, text?: string): string | null {
+  const lines = body.split('\n');
+  const tasks = taskLines(body);
+  const textOf = (i: number) => lines[i].replace(TASK_LINE, '').trim();
+  let idx = tasks.includes(line) && (text === undefined || textOf(line) === text.trim()) ? line : -1;
+  if (idx < 0 && text !== undefined) {
+    const same = tasks.filter((i) => textOf(i) === text.trim());
+    if (same.length === 1) idx = same[0];
+  }
+  if (idx < 0) return null;
+  lines[idx] = lines[idx].replace(TASK_LINE, (_m, pre: string) => `${pre}[${done ? 'x' : ' '}]`);
+  return lines.join('\n');
+}

@@ -130,3 +130,21 @@ func TestFontOptions(t *testing.T) {
 		t.Errorf("hand-written font = %+v", got.Font)
 	}
 }
+
+func TestFrontmatterCollapsed(t *testing.T) {
+	t.Setenv(EnvConfigDir, t.TempDir())
+	t.Setenv(EnvNotesDir, "")
+
+	if cfg, _ := Load(); cfg.FrontmatterCollapsed {
+		t.Error("default should be expanded")
+	}
+	if err := Set("frontmatter_collapsed", "true"); err != nil {
+		t.Fatal(err)
+	}
+	if cfg, _ := Load(); !cfg.FrontmatterCollapsed {
+		t.Error("not collapsed after Set")
+	}
+	if err := Set("frontmatter_collapsed", "maybe"); err == nil {
+		t.Error("want error for non-bool")
+	}
+}

@@ -261,3 +261,82 @@ func TestContainsTaskFrontmatter(t *testing.T) {
 		t.Errorf("Extra = %v", again.Extra)
 	}
 }
+
+func TestParseTasks(t *testing.T) {
+	body := "intro\n- [ ] one\n  - [x] nested $5\n```\n- [ ] code\n```\n> 1. [X] quoted\n[ ]\n- [link](x)\n"
+	got := ParseTasks(body)
+	want := []Task{
+		{Line: 1, Text: "one"},
+		{Line: 2, Done: true, Text: "nested $5", Indent: 2},
+		{Line: 6, Done: true, Text: "quoted"},
+		{Line: 7, Text: ""},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %+v", got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("task %d = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
+func TestStoreTasksAndSetTask(t *testing.T) {
+	s := newStore(t)
+	a, _ := s.Create(KindPage, "A", nil, "- [x] done\n")
+	b, _ := s.Create(KindPage, "B", nil, "- [ ] x\n- [ ] y\n- [x] z\n")
+	if _, err := s.Create(KindPage, "None", nil, "nothing\n"); err != nil {
+		t.Fatal(err)
+	}
+	// A file written by another tool, without the contains_task flag.
+	if err := os.WriteFile(s.Path(KindPage, "old"), []byte("* [ ] legacy $1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	all, err := s.Tasks("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var order []string
+	for _, nt := range all {
+		order = append(order, nt.Note.ID)
+	}
+	if strings.Join(order, ",") != b.ID+",old,"+a.ID {
+		t.Errorf("order = %v", order)
+	}
+	if all[0].Open != 2 || all[0].Done != 1 {
+		t.Errorf("counts = %d/%d", all[0].Open, all[0].Done)
+	}
+
+	n, err := s.SetTask(KindPage, b.ID, 1, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n.Body != "- [ ] x\n- [x] y\n- [x] z\n" {
+		t.Errorf("body = %q", n.Body)
+	}
+	n, err = s.SetTask(KindPage, "old", 0, true)
+	if err != nil || n.Body != "* [x] legacy $1\n" || n.Extra[TaskKey] != true {
+		t.Errorf("old = %q %v %v", n.Body, n.Extra, err)
+	}
+	if _, err := s.SetTask(KindPage, b.ID, 3, true); !errors.Is(err, ErrTaskMoved) {
+		t.Errorf("non-task line err = %v", err)
+	}
+}
+
+func TestFileLine(t *testing.T) {
+	s := newStore(t)
+	n, _ := s.Create(KindPage, "FL", nil, "a\n- [ ] b\n")
+	raw, _ := os.ReadFile(n.Path)
+	lines := strings.Split(string(raw), "\n")
+	got := s.FileLine(KindPage, n.ID, 1)
+	if lines[got-1] != "- [ ] b" {
+		t.Errorf("FileLine = %d -> %q", got, lines[got-1])
+	}
+	if err := os.WriteFile(s.Path(KindPage, "plain"), []byte("x\n- [ ] y\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.FileLine(KindPage, "plain", 1); got != 2 {
+		t.Errorf("plain FileLine = %d", got)
+	}
+}
