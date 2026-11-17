@@ -72,6 +72,8 @@ function addBox(line: string): { line: string; at: number; added: number; droppe
 
 // Ctrl+Enter: make the line a task, or check/uncheck it if it already is one.
 export function makeTask(line: string): string {
+  // "- [ ]" whose trailing space was stripped (GFM needs it): restore it first.
+  if (/^\s*(?:>\s*)*(?:(?:[-*+]|\d+[.)])\s+)?\[( |x|X)\]$/.test(line)) line += ' ';
   if (TASK_LINE.test(line)) {
     return line.replace(TASK_LINE, (_m, pre: string, mark: string) => `${pre}[${mark === ' ' ? 'x' : ' '}]`);
   }

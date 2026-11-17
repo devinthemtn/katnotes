@@ -13,6 +13,7 @@ Every frontend goes through the same `internal/notes` package, so they all read 
 |---|---|
 | Notes | `~/KatNotes/pages/<slug>.md` and `~/KatNotes/journal/YYYY-MM-DD.md` |
 | Options | `$XDG_CONFIG_HOME/katnotes/config.toml` (usually `~/.config/katnotes/config.toml`) |
+| Lua `/` commands (GUI) | `~/.config/katnotes/commands/<name>.lua` |
 
 You can override the notes folder with `notes_dir` in the config, `$KATNOTES_DIR`, or `--dir`.
 
@@ -40,9 +41,26 @@ editor = ""                 # falls back to $VISUAL, then $EDITOR, then nano/vim
 default_kind = "page"       # what `katnotes new` makes
 journal_template = "# {{.Date}}\n\n"   # fields: .Date .ID .Weekday .Time
 date_format = "2006-01-02"  # Go time layout for journal titles
+
+# GUI only
+open_with = ""              # app for Ctrl+Shift+O; empty = system default (xdg-open / open / start)
+start_page = "none"         # none, last, today, page/<id> or journal/<id>
+frontmatter_collapsed = false
+
+[font]                      # GUI fonts; empty families use the system ones
+body = ""                   # e.g. "Inter Variable"
+mono = ""                   # e.g. "JetBrains Mono"
+size = 14                   # base text size in px (8-40)
 ```
 
-To change these, run `katnotes config set <key> <value>`, open the file with `katnotes config edit`, or use the GUI's Settings dialog.
+To change these, run `katnotes config set <key> <value>` (use `font.size` etc. for the `[font]` table), open the file with `katnotes config edit`, or use the GUI's Settings dialog. In the GUI, `:reload` in the command palette picks up hand edits.
+
+## Tasks
+
+Markdown tasks (`- [ ] buy milk`, `- [x] done`) are plain GFM, so they work in any Markdown editor. KatNotes adds:
+
+- `contains_task: true` in a note's frontmatter while it has tasks. It is kept up to date on every save; `katnotes tasks sync` backfills notes written by other tools.
+- A Tasks tab in the TUI and GUI listing notes with tasks, and a view of every task across notes.
 
 ## CLI
 
@@ -58,6 +76,7 @@ katnotes mv <id> "New title"   # pages move to the new slug
 katnotes rm <id> [-f]
 katnotes search <query> [-p|-j]
 katnotes tags
+katnotes tasks sync [-n]       # set/remove contains_task in every note (-n: dry run)
 katnotes config path|show|edit|set
 ```
 
@@ -67,7 +86,7 @@ Every command accepts `--json` for scripting.
 
 | Key | Action |
 |---|---|
-| `tab` / `1` `2` `3` | switch between Pages, Journal and Tags |
+| `tab` / `1`–`4` | switch between Pages, Journal, Tags and Tasks |
 | `n` | new note |
 | `enter` / `e` | edit in `$EDITOR` |
 | `r` | rename |
@@ -77,12 +96,19 @@ Every command accepts `--json` for scripting.
 | `t` | filter by tag (`enter` on the Tags tab does the same) |
 | `esc` | clear filters |
 | `J` / `K` | scroll the preview |
+| `:` | command window with completion (`:sync-tasks`, `:tasks`, `:reload`, …) |
+| `v` | Tasks tab: switch between notes with tasks and all tasks |
+| `a` | Tasks tab: show or hide done tasks |
+| `x` / space | Tasks tab: check or uncheck the selected task |
+| `enter` | Tasks tab: edit the note at the task's line (vim, nano, helix, code and others) |
 | `?` / `F1` | help popup (shows the version; scrolls if the window is short) |
 | `q` | quit |
 
 ## GUI
 
-The window has a sidebar (Pages, Journal and Tags tabs, plus search) and an editor with edit, split and preview modes. Notes autosave as you type.
+The window has a sidebar (Pages, Journal, Tags and Tasks tabs, plus search) and an editor with edit, split and preview modes. Notes autosave as you type. A collapsible table above the editor shows the frontmatter, and task boxes in the preview can be clicked.
+
+In the editor, `/` at the start of a line or after a space opens a command menu: `/todo`, `/today`, `/tomorrow`, `/yesterday`, `/time`, plus your own Lua commands (below).
 
 If a note is changed outside the app (by the CLI, the TUI or another editor), the GUI says so instead of overwriting it. Changes made elsewhere are picked up when the window regains focus.
 
@@ -93,7 +119,27 @@ If a note is changed outside the app (by the CLI, the TUI or another editor), th
 | Ctrl+K | search |
 | Ctrl+S | save |
 | Ctrl+E | cycle edit, split and preview |
+| Ctrl+Enter | make the line a task, or check/uncheck it |
+| Ctrl+Shift+P / Ctrl+Shift+: | command palette (zoom, open, terminal, tasks, reload) |
+| Ctrl+Shift+T | all tasks from every note |
+| Ctrl+Shift+O | open the note in the default app (`open_with`) |
+| Ctrl+Shift+Z | zoom: hide the sidebar and top bar |
+| Ctrl+= / Ctrl+- / Ctrl+0 | larger, smaller, reset text size |
 | `?` / F1 | help popup with the app version (`?` works when you're not typing in a field) |
+
+### Lua commands
+
+Each `<name>.lua` file in `~/.config/katnotes/commands/` becomes a `/name` command in the GUI editor (gopher-lua, standard library available, 2 s limit per run). A commented `_example.lua` is created there on first launch; files starting with `_` are ignored.
+
+```lua
+-- ~/.config/katnotes/commands/sig.lua
+return {
+  description = "Insert my signature",
+  run = function(ctx)   -- ctx: line, before, after, body, note{kind,id,title,tags,path}, notes_dir, config_dir
+    return "— me, " .. os.date("%Y-%m-%d")   -- text replaces /sig; nil removes it;
+  end,                                          -- { line = "…", cursor = n } replaces the line
+}
+```
 
 ## Building
 
@@ -113,7 +159,8 @@ task install      # both binaries into $GOPATH/bin
 cmd/katnotes/       CLI entry point (no args → TUI)
 internal/notes/     core: Store, frontmatter, search, tags
 internal/config/    config.toml load/save
-internal/editor/    $EDITOR resolution
+internal/editor/    $EDITOR resolution (and open-at-line)
+internal/luacmd/    user Lua slash commands
 internal/cli/       cobra commands
 internal/tui/       Bubble Tea app
 katnotes-gui/       Wails v3 app (NotesService + Svelte frontend)

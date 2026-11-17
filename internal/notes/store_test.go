@@ -263,13 +263,13 @@ func TestContainsTaskFrontmatter(t *testing.T) {
 }
 
 func TestParseTasks(t *testing.T) {
-	body := "intro\n- [ ] one\n  - [x] nested $5\n```\n- [ ] code\n```\n> 1. [X] quoted\n[ ]\n- [link](x)\n"
+	body := "intro\n- [ ] one\n  - [x] nested $5\n```\n- [ ] code\n```\n> 1. [X] quoted\n[ ] \n- [ ]\n- [link](x)\n"
 	got := ParseTasks(body)
 	want := []Task{
 		{Line: 1, Text: "one"},
 		{Line: 2, Done: true, Text: "nested $5", Indent: 2},
 		{Line: 6, Done: true, Text: "quoted"},
-		{Line: 7, Text: ""},
+		{Line: 7, Text: ""}, // "[ ] " with a trailing space is an empty task; "- [ ]" is not
 	}
 	if len(got) != len(want) {
 		t.Fatalf("got %+v", got)

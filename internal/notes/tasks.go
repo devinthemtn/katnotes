@@ -16,7 +16,8 @@ const TaskKey = "contains_task"
 // taskLine matches a task marker at the start of a line, optionally inside a
 // blockquote and/or list item. It mirrors the GUI's frontend/src/tasks.ts.
 // Groups: 1 = everything before the box, 2 = the mark, 3 = the task text.
-var taskLine = regexp.MustCompile(`^(\s*(?:>\s*)*(?:(?:[-*+]|\d+[.)])\s+)?)\[( |x|X)\](?:\s+(.*))?$`)
+// Like GFM, the box must be followed by whitespace: a bare "- [ ]" is not a task.
+var taskLine = regexp.MustCompile(`^(\s*(?:>\s*)*(?:(?:[-*+]|\d+[.)])\s+)?)\[( |x|X)\]\s+(.*)$`)
 
 // Task is one Markdown task line in a note body.
 type Task struct {

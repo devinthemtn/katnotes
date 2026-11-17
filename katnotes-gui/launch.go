@@ -43,7 +43,9 @@ func openTerminal(dir string) error {
 		if _, err := exec.LookPath("wt"); err == nil {
 			return start(exec.Command("wt", "-d", dir))
 		}
-		return start(exec.Command("cmd", "/c", "start", "cmd", "/K", "cd", "/d", dir))
+		cmd := exec.Command("cmd", "/c", "start", "", "cmd")
+		cmd.Dir = dir // avoids quoting trouble with spaces in dir
+		return start(cmd)
 	}
 
 	candidates := []string{os.Getenv("TERMINAL"), "x-terminal-emulator",

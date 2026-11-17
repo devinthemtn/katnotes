@@ -29,13 +29,7 @@ func Resolve(configured string) ([]string, error) {
 // Command builds an *exec.Cmd that opens path in the editor, wired to the
 // current terminal.
 func Command(configured, path string) (*exec.Cmd, error) {
-	argv, err := Resolve(configured)
-	if err != nil {
-		return nil, err
-	}
-	cmd := exec.Command(argv[0], append(argv[1:], path)...)
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-	return cmd, nil
+	return CommandAt(configured, path, 0)
 }
 
 // Open runs the editor on path and waits for it to exit.

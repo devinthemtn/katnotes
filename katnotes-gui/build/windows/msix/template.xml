@@ -17,7 +17,7 @@
         PackageDisplayName="KatNotes"
         PublisherName="CN=devinthemtn"
         PublisherDisplayName="devinthemtn"
-        Version="0.1.0.0"
+        Version="0.10.0.0"
         PackageDescription="Personal Markdown notes">
         <Capabilities>
             <Capability Name="runFullTrust" />

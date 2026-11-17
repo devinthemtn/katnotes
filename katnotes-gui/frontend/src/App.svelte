@@ -1171,7 +1171,7 @@
           <button onclick={openToday}>Today's journal</button>
           <button onclick={showTasks}>Tasks</button>
         </div>
-        <p class="keys">Ctrl+N new · Ctrl+J today · Ctrl+K search · Ctrl+S save · Ctrl+E toggle preview</p>
+        <p class="keys">Ctrl+N new · Ctrl+J today · Ctrl+K search · Ctrl+E edit/split/preview · Ctrl+Shift+P commands · Ctrl+Shift+T tasks · ? help</p>
       </div>
     {/if}
     {#if zoomed}
