@@ -306,6 +306,54 @@ func tagsCmd(a *App) *cobra.Command {
 	}
 }
 
+func tasksCmd(a *App) *cobra.Command {
+	cmd := &cobra.Command{Use: "tasks", Short: "Work with Markdown tasks (- [ ] …) in notes"}
+	var dryRun bool
+	sync := &cobra.Command{
+		Use:   "sync",
+		Short: "Update the contains_task frontmatter field in every note",
+		Long: "Rescan every note and set contains_task: true in its frontmatter when the\n" +
+			"body has a task, or remove the field when it has none. Only notes that need\n" +
+			"a change are rewritten, and their updated time is kept.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			changes, err := a.Store.SyncTaskFlags(dryRun)
+			if a.jsonOut {
+				if changes == nil {
+					changes = []notes.TaskFlagChange{}
+				}
+				if jerr := a.printJSON(changes); jerr != nil {
+					return jerr
+				}
+				return err
+			}
+			verb := "updated"
+			if dryRun {
+				verb = "would update"
+			}
+			for _, c := range changes {
+				state := "contains_task: true"
+				if !c.ContainsTask {
+					state = "contains_task removed"
+				}
+				fmt.Fprintf(a.Out, "%s %s/%s (%s)\n", verb, c.Kind, c.ID, state)
+			}
+			if err != nil {
+				return err
+			}
+			if len(changes) == 0 {
+				fmt.Fprintln(a.Out, "all notes are up to date")
+			} else {
+				fmt.Fprintf(a.Out, "%s %d note(s)\n", verb, len(changes))
+			}
+			return nil
+		},
+	}
+	sync.Flags().BoolVarP(&dryRun, "dry-run", "n", false, "show what would change without writing")
+	cmd.AddCommand(sync)
+	return cmd
+}
+
 func configCmd(a *App) *cobra.Command {
 	cmd := &cobra.Command{Use: "config", Short: "Show or change options"}
 	cmd.AddCommand(

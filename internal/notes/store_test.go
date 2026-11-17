@@ -340,3 +340,42 @@ func TestFileLine(t *testing.T) {
 		t.Errorf("plain FileLine = %d", got)
 	}
 }
+
+func TestSyncTaskFlags(t *testing.T) {
+	s := newStore(t)
+	ok, _ := s.Create(KindPage, "Ok", nil, "- [ ] fine\n") // already flagged
+	// Written by another tool: has a task but no flag, and no frontmatter.
+	os.WriteFile(s.Path(KindPage, "legacy"), []byte("- [ ] old\n"), 0o644)
+	// Stale flag: no tasks any more.
+	os.WriteFile(s.Path(KindPage, "stale"), []byte("---\ntitle: Stale\nupdated: 2025-01-02T03:04:05Z\ncontains_task: true\n---\nno tasks\n"), 0o644)
+	okBefore, _ := os.ReadFile(ok.Path)
+
+	dry, err := s.SyncTaskFlags(true)
+	if err != nil || len(dry) != 2 {
+		t.Fatalf("dry run = %+v, %v", dry, err)
+	}
+	if raw, _ := os.ReadFile(s.Path(KindPage, "legacy")); string(raw) != "- [ ] old\n" {
+		t.Fatal("dry run wrote a file")
+	}
+
+	got, err := s.SyncTaskFlags(false)
+	if err != nil || len(got) != 2 {
+		t.Fatalf("sync = %+v, %v", got, err)
+	}
+	if n, _ := s.Get(KindPage, "legacy"); n.Extra[TaskKey] != true {
+		t.Errorf("legacy extra = %v", n.Extra)
+	}
+	stale, _ := s.Get(KindPage, "stale")
+	if _, has := stale.Extra[TaskKey]; has {
+		t.Errorf("stale still flagged: %v", stale.Extra)
+	}
+	if stale.Updated.Format(time.RFC3339) != "2025-01-02T03:04:05Z" {
+		t.Errorf("updated changed to %v", stale.Updated)
+	}
+	if after, _ := os.ReadFile(ok.Path); string(after) != string(okBefore) {
+		t.Error("an up-to-date note was rewritten")
+	}
+	if again, _ := s.SyncTaskFlags(false); len(again) != 0 {
+		t.Errorf("second sync = %+v", again)
+	}
+}

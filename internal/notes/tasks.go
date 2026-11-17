@@ -2,6 +2,7 @@ package notes
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"regexp"
 	"sort"
@@ -180,4 +181,40 @@ func (s *Store) FileLine(kind Kind, id string, bodyLine int) int {
 	}
 	// Opening ---, the header lines, closing ---.
 	return 2 + strings.Count(string(header), "\n") + bodyLine + 1
+}
+
+// TaskFlagChange is a note whose contains_task flag SyncTaskFlags changed.
+type TaskFlagChange struct {
+	Kind         Kind   `json:"kind"`
+	ID           string `json:"id"`
+	Path         string `json:"path"`
+	ContainsTask bool   `json:"contains_task"`
+}
+
+// SyncTaskFlags rescans every note and sets or removes the contains_task
+// frontmatter key to match its body. Only notes whose flag is wrong are
+// rewritten, and their updated time is left alone. With dryRun nothing is
+// written; the changes that would be made are still returned.
+func (s *Store) SyncTaskFlags(dryRun bool) ([]TaskFlagChange, error) {
+	ns, err := s.List("", ListOpts{})
+	if err != nil {
+		return nil, err
+	}
+	var out []TaskFlagChange
+	for i := range ns {
+		n := &ns[i]
+		want := HasTask(n.Body)
+		v, present := n.Extra[TaskKey]
+		if (want && v == true) || (!want && !present) {
+			continue
+		}
+		out = append(out, TaskFlagChange{Kind: n.Kind, ID: n.ID, Path: n.Path, ContainsTask: want})
+		if dryRun {
+			continue
+		}
+		if err := s.write(n, false); err != nil { // write runs syncTaskFlag
+			return out, fmt.Errorf("%s/%s: %w", n.Kind, n.ID, err)
+		}
+	}
+	return out, nil
 }

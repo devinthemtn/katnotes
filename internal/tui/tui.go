@@ -48,6 +48,7 @@ const (
 	modeInput
 	modeConfirm
 	modeHelp
+	modeCommand
 )
 
 type inputPurpose int
@@ -201,6 +202,9 @@ type model struct {
 	confirm *notes.Note
 	help    viewport.Model
 
+	cmdInput textinput.Model // the ":" command window
+	cmdSel   int
+
 	tagFilter string
 	query     string
 	allTasks  bool                   // Tasks tab: list every task instead of notes with tasks
@@ -227,7 +231,7 @@ func newModel(app *cli.App, style string) model {
 	ti := textinput.New()
 	ti.CharLimit = 200
 
-	m := model{app: app, style: style, list: l, view: viewport.New(0, 0), help: viewport.New(0, 0), input: ti, cache: map[string]string{}}
+	m := model{app: app, style: style, list: l, view: viewport.New(0, 0), help: viewport.New(0, 0), input: ti, cmdInput: newCmdInput(), cache: map[string]string{}}
 	m.reload()
 	return m
 }
@@ -467,6 +471,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateConfirm(msg)
 		case modeHelp:
 			return m.updateHelp(msg)
+		case modeCommand:
+			return m.updateCommand(msg)
 		}
 		return m.updateNormal(msg)
 	}
@@ -479,6 +485,8 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q", "ctrl+c":
 		return m, tea.Quit
+	case ":":
+		return m, m.openCommand()
 	case "?", "f1":
 		m.mode = modeHelp
 		m.sizeHelp()
@@ -742,6 +750,9 @@ func (m model) View() string {
 
 	var bottom string
 	switch m.mode {
+	case modeCommand:
+		bottom = m.commandInputView()
+		body = overlayBottom(body, m.commandDropdown())
 	case modeInput:
 		bottom = m.input.View()
 	case modeConfirm:
@@ -758,13 +769,13 @@ func (m model) View() string {
 	if m.mode == modeHelp {
 		return m.helpView()
 	}
-	help := statusStyle.Render("? help · n new · enter/e edit · r rename · d delete · T today · / search · t tag · tab switch · J/K scroll · q quit")
+	help := statusStyle.Render(": commands · ? help · n new · enter/e edit · r rename · d delete · T today · / search · t tag · tab switch · J/K scroll · q quit")
 	if m.tab == tabTasks {
 		view := "v all tasks"
 		if m.allTasks {
 			view = "v notes · a done · x check"
 		}
-		help = statusStyle.Render("? help · enter edit at task · " + view + " · / search · t tag · tab switch · q quit")
+		help = statusStyle.Render(": commands · ? help · enter edit at task · " + view + " · / search · t tag · tab switch · q quit")
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, header, filterLine, body, bottom, help)
 }
@@ -813,6 +824,7 @@ var helpSections = []struct {
 		{"esc", "clear search and tag filter"},
 	}},
 	{"General", []helpEntry{
+		{":", "command window (e.g. :sync-tasks updates contains_task everywhere)"},
 		{"? / F1", "toggle this help"},
 		{"q / ctrl+c", "quit"},
 	}},
