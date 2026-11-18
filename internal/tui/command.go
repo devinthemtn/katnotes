@@ -2,6 +2,9 @@ package tui
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -43,6 +46,9 @@ var commands = []tuiCommand{
 		m.list.Select(0)
 		m.reload()
 		return nil
+	}},
+	{"terminal", "Open a shell in the selected note's folder (exit to return)", func(m *model) tea.Cmd {
+		return m.shellCmd()
 	}},
 	{"reload", "Reload notes from disk", func(m *model) tea.Cmd {
 		m.cache = map[string]string{}
@@ -226,3 +232,23 @@ func overlayBottom(base, box string) string {
 	copy(bl[len(bl)-len(xl):], xl)
 	return strings.Join(bl, "\n")
 }
+
+// shellCmd suspends the TUI and runs the user's shell in the selected note's
+// folder (the notes root when nothing is selected). Exiting the shell
+// returns to KatNotes and reloads, in case files changed meanwhile.
+func (m *model) shellCmd() tea.Cmd {
+	dir := m.app.Store.Root
+	if n := m.selected(); n != nil && n.Path != "" {
+		dir = filepath.Dir(n.Path)
+	}
+	sh := os.Getenv("SHELL")
+	if sh == "" {
+		sh = "/bin/sh"
+	}
+	c := exec.Command(sh)
+	c.Dir = dir
+	return tea.ExecProcess(c, func(err error) tea.Msg { return shellDoneMsg{err} })
+}
+
+// shellDoneMsg reports that the ":terminal" shell exited.
+type shellDoneMsg struct{ err error }

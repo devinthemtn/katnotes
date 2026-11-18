@@ -2,8 +2,10 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -68,17 +70,18 @@ type noteItem struct{ n notes.Note }
 
 func (i noteItem) Title() string { return i.n.Title }
 func (i noteItem) Description() string {
-	parts := []string{}
 	if i.n.Kind == notes.KindPage {
-		parts = append(parts, i.n.Updated.Format("Jan 02 2006"))
-	} else {
-		parts = append(parts, i.n.ID)
+		// Dates on one line, tags on the next (see pageItemHeight).
+		const day = "Jan 02 2006"
+		lines := []string{i.n.Created.Format(day) + "  │  m: " + i.n.Updated.Format(day)}
+		if len(i.n.Tags) > 0 {
+			lines = append(lines, "#"+strings.Join(i.n.Tags, " #"))
+		}
+		return strings.Join(lines, "\n")
 	}
+	parts := []string{i.n.ID}
 	if len(i.n.Tags) > 0 {
 		parts = append(parts, "#"+strings.Join(i.n.Tags, " #"))
-	}
-	if i.n.Snippet != "" {
-		parts = append(parts, i.n.Snippet)
 	}
 	return strings.Join(parts, " · ")
 }
@@ -316,6 +319,24 @@ func newModel(app *cli.App, style string) model {
 	return m
 }
 
+// pageItemHeight is the row height for page items: title, dates, tags.
+const pageItemHeight = 3
+
+// setItemHeight makes list rows tall enough for multi-line page items when
+// any are present, and keeps the compact two-line rows otherwise.
+func (m *model) setItemHeight(items []list.Item) {
+	h := 2
+	for _, it := range items {
+		if ni, ok := it.(noteItem); ok && ni.n.Kind == notes.KindPage {
+			h = pageItemHeight
+			break
+		}
+	}
+	d := list.NewDefaultDelegate()
+	d.SetHeight(h)
+	m.list.SetDelegate(d)
+}
+
 func (m model) Init() tea.Cmd { return nil }
 
 func key(n *notes.Note) string { return string(n.Kind) + "/" + n.ID }
@@ -380,6 +401,7 @@ func (m *model) reload() {
 	if err != nil {
 		m.setErr(err)
 	}
+	m.setItemHeight(items)
 	m.list.SetItems(items)
 	if sel != "" {
 		for i, it := range items {
@@ -609,6 +631,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.layout()
 		return m, nil
 
+	case shellDoneMsg:
+		// A non-zero exit just means the last command in the shell failed.
+		var exit *exec.ExitError
+		if msg.err != nil && !errors.As(msg.err, &exit) {
+			m.setErr(fmt.Errorf("terminal: %w", msg.err))
+		}
+		m.cache = map[string]string{}
+		m.reload()
+		return m, nil
 	case previewedMsg:
 		if msg.err != nil {
 			m.setErr(fmt.Errorf("previewer: %w", msg.err))

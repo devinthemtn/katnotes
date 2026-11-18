@@ -153,7 +153,7 @@ Every command accepts `--json` for scripting.
 | `t` | filter by tag (`enter` on the Tags tab does the same) |
 | `esc` | clear filters |
 | `J` / `K` | scroll the preview |
-| `:` | command window with completion (`:sync-tasks`, `:tasks`, `:reload`, …) |
+| `:` | command window with completion (`:sync-tasks`, `:tasks`, `:terminal`, `:reload`, …) |
 | `v` | Tasks tab: switch between notes with tasks and all tasks |
 | `a` | Tasks tab: show or hide done tasks |
 | `x` / space | Tasks tab: check or uncheck the selected task |
