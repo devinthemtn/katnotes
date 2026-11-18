@@ -405,7 +405,10 @@ func programs(_ *Env, _ []string) []Suggestion {
 	var out []Suggestion
 	for _, p := range editor.KnownPrograms() {
 		detail := "opens a window"
-		if p.InTerminal {
+		switch {
+		case p.Either:
+			detail = "terminal or window, by its options (e.g. -nw)"
+		case p.InTerminal:
 			detail = "runs in a terminal"
 		}
 		out = append(out, Suggestion{Value: p.Name, Label: p.Name, Detail: detail})

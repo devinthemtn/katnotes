@@ -2284,9 +2284,14 @@
           onchange={async (e) => { const v = (e.target as HTMLInputElement).checked; await saveSetting('frontmatter_collapsed', String(v)); fmOpen = !v; }} />
         Start with the frontmatter table collapsed
       </label>
-      <label>Open notes with (GUI)
-        <input value={cfg.open_with} placeholder="system default (xdg-open)" onchange={(e) => saveSetting('open_with', (e.target as HTMLInputElement).value)} />
-      </label>
+      <div class="row font-row">
+        <label>Open notes with (:external)
+          <input value={cfg.open_with} placeholder="system default (xdg-open)" onchange={(e) => saveSetting('open_with', (e.target as HTMLInputElement).value)} />
+        </label>
+        <label>…in the TUI
+          <input value={cfg.tui_open_with ?? ''} placeholder="same as open_with" onchange={(e) => saveSetting('tui_open_with', (e.target as HTMLInputElement).value)} />
+        </label>
+      </div>
       <label>Journal title date format (Go layout)
         <input value={cfg.date_format} onchange={(e) => saveSetting('date_format', (e.target as HTMLInputElement).value)} />
       </label>

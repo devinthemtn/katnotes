@@ -74,6 +74,9 @@ func TestParse(t *testing.T) {
 			t.Errorf("Parse(%q) succeeded", bad)
 		}
 	}
+	if _, err := Parse(AppTUI, "external"); err != nil {
+		t.Errorf("external in the TUI: %v", err)
+	}
 	if _, err := Parse(AppGUI, "zoom"); err != nil {
 		t.Errorf("zoom in the GUI: %v", err)
 	}

@@ -148,3 +148,21 @@ func TestFrontmatterCollapsed(t *testing.T) {
 		t.Error("want error for non-bool")
 	}
 }
+
+func TestOpenWithFor(t *testing.T) {
+	t.Setenv(EnvConfigDir, t.TempDir())
+	if err := Set("open_with", "emacsclient -c -a ''"); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _ := Load()
+	if cfg.OpenWithFor("tui") != "emacsclient -c -a ''" || cfg.OpenWithFor("gui") != "emacsclient -c -a ''" {
+		t.Errorf("no tui_open_with: %+v", cfg)
+	}
+	if err := Set("tui_open_with", "emacsclient -nw -a ''"); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _ = Load()
+	if cfg.OpenWithFor("tui") != "emacsclient -nw -a ''" || cfg.OpenWithFor("gui") != "emacsclient -c -a ''" {
+		t.Errorf("with tui_open_with: %+v", cfg)
+	}
+}

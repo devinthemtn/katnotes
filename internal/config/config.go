@@ -37,9 +37,13 @@ type Config struct {
 	DefaultKind     string `toml:"default_kind" json:"default_kind"`
 	JournalTemplate string `toml:"journal_template" json:"journal_template"`
 	DateFormat      string `toml:"date_format" json:"date_format"`
-	// OpenWith is the GUI's "open in external app" command; empty means the
-	// system default (xdg-open / open / start).
+	// OpenWith is the program ":external" (GUI: Ctrl+Shift+O) opens a note
+	// in, e.g. "emacsclient -c -a ''"; empty means the system default app
+	// (xdg-open / open / start).
 	OpenWith string `toml:"open_with" json:"open_with"`
+	// TUIOpenWith overrides OpenWith in the TUI, e.g. "emacsclient -nw";
+	// empty uses OpenWith.
+	TUIOpenWith string `toml:"tui_open_with" json:"tui_open_with"`
 	// StartPage is what the GUI opens on launch: "none" (welcome screen),
 	// "last" (last opened note), "today" (today's journal entry), or a note
 	// as "page/<id>" or "journal/<id>".
@@ -189,6 +193,15 @@ func Install() error {
 	return Save(Default())
 }
 
+// OpenWithFor is the ":external" program for app ("tui" or "gui"): the
+// TUI's own tui_open_with, else open_with. "" means the system default.
+func (c Config) OpenWithFor(app string) string {
+	if app == "tui" && strings.TrimSpace(c.TUIOpenWith) != "" {
+		return c.TUIOpenWith
+	}
+	return c.OpenWith
+}
+
 // ThemeKey is the option that holds app's theme: "tui_theme", "gui_theme",
 // or "theme" for any other app.
 func ThemeKey(app string) string {
@@ -222,7 +235,7 @@ func ExpandHome(p string) string {
 }
 
 // Keys lists the option names accepted by Set.
-var Keys = []string{"notes_dir", "editor", "previewer", "previewer_mode", "default_kind", "journal_template", "date_format", "open_with", "start_page", "frontmatter_collapsed", "task_done_date", "theme", "tui_theme", "gui_theme", "font.body", "font.mono", "font.size"}
+var Keys = []string{"notes_dir", "editor", "previewer", "previewer_mode", "default_kind", "journal_template", "date_format", "open_with", "tui_open_with", "start_page", "frontmatter_collapsed", "task_done_date", "theme", "tui_theme", "gui_theme", "font.body", "font.mono", "font.size"}
 
 // Set updates one option in the config file. It edits the file's own values,
 // not the env-overridden view returned by Load.
@@ -263,7 +276,9 @@ func Set(key, value string) error {
 	case "date_format":
 		cfg.DateFormat = value
 	case "open_with":
-		cfg.OpenWith = value
+		cfg.OpenWith = strings.TrimSpace(value)
+	case "tui_open_with":
+		cfg.TUIOpenWith = strings.TrimSpace(value)
 	case "frontmatter_collapsed":
 		b, err := strconv.ParseBool(strings.TrimSpace(value))
 		if err != nil {

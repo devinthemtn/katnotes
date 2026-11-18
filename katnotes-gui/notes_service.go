@@ -342,8 +342,8 @@ func (s *NotesService) ChooseNotesDir() (string, error) {
 	return dir, s.SetOption("notes_dir", dir)
 }
 
-// OpenExternal opens a note's file with the open_with option, or the system
-// default app when it is empty.
+// OpenExternal opens a note's file with the open_with option (like
+// OpenWith), or the system default app when it is empty.
 func (s *NotesService) OpenExternal(kind, id string) error {
 	st := s.lock()
 	k, err := notes.ParseKind(kind)
@@ -351,7 +351,7 @@ func (s *NotesService) OpenExternal(kind, id string) error {
 		s.mu.Unlock()
 		return err
 	}
-	path, cmdline := st.Path(k, id), s.cfg.OpenWith
+	path, cmdline := st.Path(k, id), s.cfg.OpenWithFor(commands.AppGUI)
 	s.mu.Unlock()
 	if _, err := os.Stat(path); err != nil {
 		return err

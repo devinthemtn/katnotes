@@ -20,20 +20,13 @@ func start(cmd *exec.Cmd) error {
 	return nil
 }
 
-// openExternal opens path with cmdline (e.g. "code -n"), or with the system
-// default app when cmdline is empty.
+// openExternal opens path with cmdline (open_with, e.g. "code -n"), just
+// as ":open-with" would, or with the system default app when it is empty.
 func openExternal(cmdline, path string) error {
-	if f := strings.Fields(cmdline); len(f) > 0 {
-		return start(exec.Command(f[0], append(f[1:], path)...))
+	if strings.TrimSpace(cmdline) != "" {
+		return openWith(cmdline, path)
 	}
-	switch runtime.GOOS {
-	case "darwin":
-		return start(exec.Command("open", path))
-	case "windows":
-		return start(exec.Command("cmd", "/c", "start", "", path))
-	default:
-		return start(exec.Command("xdg-open", path))
-	}
+	return start(editor.SystemOpenCommand(path))
 }
 
 // openTerminal opens a terminal window whose working directory is dir.

@@ -248,7 +248,7 @@ func init() {
 		{Name: "open-with", Desc: "Open the note once in another program, e.g. open-with code (end with & to detach)", NeedsNote: true, UI: true, Args: []Arg{
 			{Name: "program", Kind: ArgText, Rest: true, complete: programs},
 		}},
-		{Name: "external", Desc: "Open the note in the system's default app", NeedsNote: true, UI: true, Apps: []string{AppGUI}},
+		{Name: "external", Desc: "Open the note in open_with (TUI: tui_open_with), or the system's default app", NeedsNote: true, UI: true},
 		{Name: "theme", Desc: "Set this app's colour theme (auto, light, dark, a file in themes/, or shared)", Args: []Arg{
 			{Name: "theme", Kind: ArgText, Optional: true, complete: themes},
 		}, run: runTheme},

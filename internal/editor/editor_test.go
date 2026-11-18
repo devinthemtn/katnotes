@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -81,6 +82,26 @@ func TestInTerminal(t *testing.T) {
 	} {
 		if term, known := InTerminal(prog); term != want[0] || known != want[1] {
 			t.Errorf("%s: term=%v known=%v, want %v", prog, term, known, want)
+		}
+	}
+}
+
+func TestSplitArgs(t *testing.T) {
+	for in, want := range map[string][]string{
+		`emacsclient -nw -a ''`: {"emacsclient", "-nw", "-a", ""},
+		`code  --wait`:          {"code", "--wait"},
+		`vim "-c" "set ft=md"`:  {"vim", "-c", "set ft=md"},
+		`a 'it''s' b\ c "q\"x"`: {"a", "its", "b c", `q"x`},
+		``:                      nil,
+	} {
+		got, err := SplitArgs(in)
+		if err != nil || !reflect.DeepEqual(got, want) {
+			t.Errorf("SplitArgs(%q) = %q, %v; want %q", in, got, err, want)
+		}
+	}
+	for _, bad := range []string{`a 'b`, `a "b`} {
+		if _, err := SplitArgs(bad); err == nil {
+			t.Errorf("%q accepted", bad)
 		}
 	}
 }

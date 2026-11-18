@@ -740,6 +740,21 @@ func (m *model) previewCmd(n *notes.Note) tea.Cmd {
 	return nil
 }
 
+// externalCmd opens n with tui_open_with (else open_with), or the system
+// default app when neither is set.
+func (m *model) externalCmd(n *notes.Note) tea.Cmd {
+	if cmdline := m.app.Cfg.OpenWithFor(commands.AppTUI); strings.TrimSpace(cmdline) != "" {
+		return m.openWithCmd(n, cmdline)
+	}
+	m.touchRecent(n)
+	if err := editor.StartDetached(editor.SystemOpenCommand(n.Path)); err != nil {
+		m.setErr(fmt.Errorf("external: %w (set tui_open_with or open_with)", err))
+		return nil
+	}
+	m.setStatus("opened " + key(n) + " in the default app")
+	return nil
+}
+
 // openWithCmd opens n once with cmdline instead of the configured editor.
 // Terminal programs take over the screen, then the note reloads as after
 // an edit; window programs start alongside the TUI.
