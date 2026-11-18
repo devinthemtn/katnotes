@@ -73,7 +73,6 @@ type inputPurpose int
 
 const (
 	inNew inputPurpose = iota
-	inSearch
 	inTag
 	inRename
 	inDue
@@ -237,13 +236,13 @@ func firstOpen(ts []notes.Task) (notes.Task, bool) {
 
 // nextPriority cycles none → high → med → low → none.
 func nextPriority(p string) string {
-	switch p {
-	case "":
-		return "high"
-	case "high":
-		return "med"
-	case "med":
-		return "low"
+	if p == "" {
+		return notes.Priorities[0]
+	}
+	for i, x := range notes.Priorities {
+		if x == p && i+1 < len(notes.Priorities) {
+			return notes.Priorities[i+1]
+		}
 	}
 	return ""
 }
@@ -378,7 +377,7 @@ func newModel(app *cli.App, style string) model {
 	if p, err := recent.Path(); err == nil {
 		m.recentPath = p
 	}
-	m.taskShow = "open"
+	m.taskShow = showOpen
 	m.searchMode = notes.SearchName
 	m.searchInput = newSearchInput()
 	m.sorts = map[notes.Kind]notes.SortBy{}
@@ -589,7 +588,7 @@ func (m *model) showNote(n *notes.Note) {
 	}
 	m.reload()
 	k := n.Key()
-	if itemKey(m.list.SelectedItem()) != k && !m.hasItem(k) {
+	if !m.hasItem(k) {
 		m.tagFilter, m.query = "", ""
 		m.reload()
 	}
@@ -649,7 +648,7 @@ func (m *model) layout() {
 	r, err := glamour.NewTermRenderer(glamour.WithStandardStyle(m.style), glamour.WithWordWrap(m.view.Width-2))
 	if err == nil {
 		m.render = r
-		m.cache = map[string]string{}
+		m.resetCache()
 	}
 	m.preview = ""
 	m.updatePreview()
@@ -696,7 +695,7 @@ func (m *model) updatePreview() {
 		msg := "\n  Nothing here yet. Press n to create a note, T for today's journal."
 		if m.tab == tabTasks {
 			msg = "\n  No tasks found. Add \"- [ ] something\" to a note."
-			if m.allTasks && (m.taskShow != "all" || m.taskWhen != notes.WhenAny) {
+			if m.allTasks && (m.taskShow != showAll || m.taskWhen != notes.WhenAny) {
 				msg += "\n  (filtered: " + m.taskFilterText() + ". a / w change it)"
 			}
 		}
@@ -805,7 +804,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil && !errors.As(msg.err, &exit) {
 			m.setErr(fmt.Errorf("terminal: %w", msg.err))
 		}
-		m.cache = map[string]string{}
+		m.resetCache()
 		m.reload()
 		return m, nil
 	case previewedMsg:
@@ -851,34 +850,22 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case ":":
 		return m, m.openCommand()
 	case "?", "f1":
-		m.mode = modeHelp
-		m.sizeHelp()
-		m.help.SetContent(helpBody())
-		m.help.GotoTop()
+		m.openHelp()
 		return m, nil
 	case "tab", "right", "l":
-		m.tab = (m.tab + 1) % tab(len(tabNames))
-		m.clearViews()
-		m.list.Select(0)
-		m.reload()
+		m.switchTab((m.tab + 1) % tab(len(tabNames)))
 		return m, nil
 	case "shift+tab", "left", "h":
-		m.tab = (m.tab + tab(len(tabNames)) - 1) % tab(len(tabNames))
-		m.clearViews()
-		m.list.Select(0)
-		m.reload()
+		m.switchTab((m.tab + tab(len(tabNames)) - 1) % tab(len(tabNames)))
 		return m, nil
 	case "1", "2", "3", "4":
-		m.tab = tab(msg.String()[0] - '1')
-		m.clearViews()
-		m.list.Select(0)
-		m.reload()
+		m.switchTab(tab(msg.String()[0] - '1'))
 		return m, nil
 	case "esc":
 		if m.pick != nil {
 			m.pick = nil
 			m.list.Select(0)
-			m.setStatus(m.pickClosedStatus())
+			m.setStatus("list closed")
 			m.reload()
 			return m, nil
 		}
@@ -933,9 +920,7 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.startInput(inRename, "Rename to: ", n.Title)
 		}
 	case "d", "delete":
-		if n := m.selected(); n != nil {
-			m.mode, m.confirm = modeConfirm, n
-		}
+		m.confirmDelete()
 		return m, nil
 	case "v":
 		if m.tab == tabTasks {
@@ -951,7 +936,7 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "a":
 		if m.tab == tabTasks && m.allTasks {
-			m.taskShow = map[string]string{"open": "done", "done": "all", "all": "open"}[m.taskShow]
+			m.taskShow = map[string]string{showOpen: showDone, showDone: showAll, showAll: showOpen}[m.taskShow]
 			m.reload()
 			m.setStatus("tasks: " + m.taskFilterText())
 		}
@@ -965,7 +950,7 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "F":
 		m.fmOpen = !m.fmOpen
-		m.cache = map[string]string{}
+		m.resetCache()
 		m.preview = ""
 		m.updatePreview()
 		if m.fmOpen {
@@ -1017,57 +1002,19 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "e", "enter":
-		if m.pick != nil && msg.String() == "enter" {
-			if n := m.selected(); n != nil {
-				m.pick = nil
-				m.touchRecent(n)
-				m.showNote(n)
-				m.setStatus("opened " + n.Key() + " (enter edits)")
-			}
-			return m, nil
-		}
-		switch it := m.list.SelectedItem().(type) {
-		case missingItem:
-			n, _, err := m.app.Store.Ensure(it.l.Kind, it.l.ID, it.l.Text)
-			if err != nil {
-				m.setErr(err)
-				return m, nil
-			}
-			m.setStatus("created " + n.Key())
-			m.reload()
-			m.selectKey(n.Key())
-			return m, m.editCmd(n)
-		case taskItem:
-			n := it.n
-			return m, m.editCmdAt(&n, m.app.Store.FileLine(n.Kind, n.ID, it.t.Line))
-		case taskNoteItem:
-			n := it.nt.Note
-			line := 0
-			if t, ok := firstOpen(it.nt.Tasks); ok {
-				line = m.app.Store.FileLine(n.Kind, n.ID, t.Line)
-			}
-			return m, m.editCmdAt(&n, line)
-		}
-		if it, ok := m.list.SelectedItem().(savedItem); ok {
-			m.applySearch(it.s.Mode, it.s.Text)
-			return m, nil
-		}
-		if it, ok := m.list.SelectedItem().(tagItem); ok {
-			m.tagFilter = it.t.Tag
-			m.tab = tabPages
-			m.clearViews()
-			m.list.Select(0)
-			m.setStatus("filtering by #" + it.t.Tag + " (esc clears)")
-			m.reload()
-			return m, nil
-		}
-		if n := m.selected(); n != nil {
-			return m, m.editCmd(n)
-		}
+		return m, m.enter(msg.String() == "enter")
+	case "ctrl+f":
+		m.list.NextPage()
+		m.skipHeaders("down")
+		m.updatePreview()
+		return m, nil
+	case "ctrl+b":
+		m.list.PrevPage()
+		m.skipHeaders("down")
+		m.updatePreview()
 		return m, nil
 	case "R":
-		m.reload()
-		m.setStatus("reloaded")
+		m.reloadAll()
 		return m, nil
 	case "pgdown", "ctrl+d", "J":
 		m.view.HalfPageDown()
@@ -1081,6 +1028,87 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m.skipHeaders(msg.String())
 	m.updatePreview()
 	return m, cmd
+}
+
+// enter acts on the selected row: e edits it, and Enter does what the row
+// is for (open a picked note, create a missing one, apply a saved search or
+// tag filter, edit a note or task).
+func (m *model) enter(isEnter bool) tea.Cmd {
+	if m.pick != nil && isEnter {
+		if n := m.selected(); n != nil {
+			m.pick = nil
+			m.touchRecent(n)
+			m.showNote(n)
+			m.setStatus("opened " + n.Key() + " (enter edits)")
+		}
+		return nil
+	}
+	switch it := m.list.SelectedItem().(type) {
+	case missingItem:
+		n, _, err := m.app.Store.Ensure(it.l.Kind, it.l.ID, it.l.Text)
+		if err != nil {
+			m.setErr(err)
+			return nil
+		}
+		m.setStatus("created " + n.Key())
+		m.reload()
+		m.selectKey(n.Key())
+		return m.editCmd(n)
+	case taskItem:
+		n := it.n
+		return m.editCmdAt(&n, m.app.Store.FileLine(n.Kind, n.ID, it.t.Line))
+	case taskNoteItem:
+		n := it.nt.Note
+		line := 0
+		if t, ok := firstOpen(it.nt.Tasks); ok {
+			line = m.app.Store.FileLine(n.Kind, n.ID, t.Line)
+		}
+		return m.editCmdAt(&n, line)
+	case savedItem:
+		m.applySearch(it.s.Mode, it.s.Text)
+		return nil
+	case tagItem:
+		m.tagFilter = it.t.Tag
+		m.switchTab(tabPages)
+		m.setStatus("filtering by #" + it.t.Tag + " (esc clears)")
+		return nil
+	}
+	if n := m.selected(); n != nil {
+		return m.editCmd(n)
+	}
+	return nil
+}
+
+// switchTab shows tab t from the top, leaving any links or pick view.
+func (m *model) switchTab(t tab) {
+	m.tab = t
+	m.clearViews()
+	m.list.Select(0)
+	m.reload()
+}
+
+// resetCache drops the rendered previews, e.g. after notes changed on disk.
+func (m *model) resetCache() { m.cache = map[string]string{} }
+
+// reloadAll rereads every note and redraws the previews (R and :reload).
+func (m *model) reloadAll() {
+	m.resetCache()
+	m.reload()
+	m.setStatus("reloaded")
+}
+
+func (m *model) openHelp() {
+	m.mode = modeHelp
+	m.sizeHelp()
+	m.help.SetContent(helpBody())
+	m.help.GotoTop()
+}
+
+// confirmDelete asks before deleting the selected note.
+func (m *model) confirmDelete() {
+	if n := m.selected(); n != nil {
+		m.mode, m.confirm = modeConfirm, n
+	}
 }
 
 func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -1154,7 +1182,7 @@ func (m model) submit(val string) (tea.Model, tea.Cmd) {
 			if len(relinked) > 0 {
 				msg += fmt.Sprintf(" · updated links in %d note(s)", len(relinked))
 			}
-			m.cache = map[string]string{}
+			m.resetCache()
 			m.setStatus(msg)
 			m.reload()
 			m.selectKey(r.Key())
@@ -1292,6 +1320,7 @@ var helpSections = []struct {
 		{"tab  →  l", "next tab"},
 		{"shift+tab ← h", "previous tab"},
 		{"1 2 3 4", "Pages / Journal / Tags / Tasks"},
+		{"ctrl+f / ctrl+b", "next / previous page of the list"},
 		{"J / K", "scroll preview (also pgdn/pgup, ctrl+d/u)"},
 	}},
 	{"Notes", []helpEntry{

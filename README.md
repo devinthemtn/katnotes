@@ -205,7 +205,9 @@ Every command accepts `--json` for scripting. The commands shared with the comma
 | `s` | sort Pages / Journal: modified, created, title |
 | `t` | filter by tag (`enter` on the Tags tab does the same) |
 | `esc` | clear filters |
+| `R` | reload notes from disk (same as `:reload`) |
 | `J` / `K` | scroll the preview |
+| `ctrl+f` / `ctrl+b` | next / previous page of the list |
 | `:` | command window: `:open`, `:tag add`, `:set`, `:frontmatter`, … with completion (see [Command window](#command-window)) |
 | `v` | Tasks tab: switch between notes with tasks and all tasks |
 | `a` | all tasks: cycle open → done → all |

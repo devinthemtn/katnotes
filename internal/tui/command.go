@@ -23,17 +23,12 @@ import (
 var tuiActions = map[string]func(m *model, r commands.Result) tea.Cmd{
 	"frontmatter": func(m *model, _ commands.Result) tea.Cmd { return m.frontmatterCmd() },
 	"delete": func(m *model, _ commands.Result) tea.Cmd {
-		if n := m.selected(); n != nil {
-			m.mode, m.confirm = modeConfirm, n
-		}
+		m.confirmDelete()
 		return nil
 	},
 	"tasks": func(m *model, r commands.Result) tea.Cmd {
 		m.setTaskFilters(r.Args)
-		m.tab = tabTasks
-		m.clearViews()
-		m.list.Select(0)
-		m.reload()
+		m.switchTab(tabTasks)
 		return nil
 	},
 	"terminal": func(m *model, _ commands.Result) tea.Cmd { return m.shellCmd() },
@@ -56,16 +51,11 @@ var tuiActions = map[string]func(m *model, r commands.Result) tea.Cmd{
 		return nil
 	},
 	"reload": func(m *model, _ commands.Result) tea.Cmd {
-		m.cache = map[string]string{}
-		m.reload()
-		m.setStatus("reloaded")
+		m.reloadAll()
 		return nil
 	},
 	"help": func(m *model, _ commands.Result) tea.Cmd {
-		m.mode = modeHelp
-		m.sizeHelp()
-		m.help.SetContent(helpBody())
-		m.help.GotoTop()
+		m.openHelp()
 		return nil
 	},
 	"quit": func(m *model, _ commands.Result) tea.Cmd { return tea.Quit },
@@ -253,7 +243,7 @@ func (m *model) runCommandLine(line string) tea.Cmd {
 
 func (m *model) applyResult(line string, r commands.Result, err error) tea.Cmd {
 	if r.Changed {
-		m.cache = map[string]string{}
+		m.resetCache()
 	}
 	if err != nil {
 		m.setErr(err)

@@ -142,7 +142,7 @@ func (m *model) afterFrontmatterEdit(msg fmEditedMsg) {
 	if len(relinked) > 0 {
 		status += fmt.Sprintf(" · updated links in %d note(s)", len(relinked))
 	}
-	m.cache = map[string]string{}
+	m.resetCache()
 	m.setStatus(status)
 	m.reload()
 	m.selectKey(r.Key())

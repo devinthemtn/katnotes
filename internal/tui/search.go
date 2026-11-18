@@ -239,12 +239,11 @@ func (m *model) applySearch(mode, text string) {
 		return
 	}
 	m.searchMode, m.query = md, text
-	m.clearViews()
-	if m.tab != tabPages && m.tab != tabJournal {
-		m.tab = tabPages
+	t := m.tab
+	if t != tabPages && t != tabJournal {
+		t = tabPages
 	}
-	m.list.Select(0)
-	m.reload()
+	m.switchTab(t)
 	m.setStatus(fmt.Sprintf("search %s %q: %d note(s) · esc clears", md, text, len(m.noteItems())))
 }
 

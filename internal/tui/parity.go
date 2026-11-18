@@ -29,8 +29,6 @@ func (m *model) clearViews() {
 	m.pick = nil
 }
 
-func (m *model) pickClosedStatus() string { return "list closed" }
-
 // showPick switches the list to a command's pick list.
 func (m *model) showPick(title string, items []commands.Choice) {
 	m.links = nil
@@ -40,11 +38,18 @@ func (m *model) showPick(title string, items []commands.Choice) {
 	m.setStatus(fmt.Sprintf("%s: %d note(s) · enter opens · esc closes", title, len(m.list.Items())))
 }
 
+// What the all-tasks view shows (the GUI's Open / Done / All buttons).
+const (
+	showOpen = "open"
+	showDone = "done"
+	showAll  = "all"
+)
+
 // taskFilter is the all-tasks view's filter.
 func (m *model) taskFilter() notes.TaskFilter {
 	return notes.TaskFilter{
-		IncludeDone: m.taskShow == "all",
-		OnlyDone:    m.taskShow == "done",
+		IncludeDone: m.taskShow == showAll,
+		OnlyDone:    m.taskShow == showDone,
 		When:        m.taskWhen,
 	}
 }
@@ -58,7 +63,7 @@ func (m *model) taskFilterText() string {
 func (m *model) setTaskFilters(args []string) {
 	for _, a := range args {
 		switch a = strings.ToLower(a); a {
-		case "open", "done", "all":
+		case showOpen, showDone, showAll:
 			m.taskShow = a
 		case "any":
 			m.taskWhen = notes.WhenAny
