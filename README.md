@@ -227,6 +227,7 @@ If a note is changed outside the app (by the CLI, the TUI or another editor), th
 | Ctrl+E | cycle edit, split and preview |
 | `[[` | link to a page or journal day (picker; saved as a Markdown link) |
 | Ctrl+Enter | make the line a task, or check/uncheck it |
+| Enter | on a list item or task: continue the list below, with the same bullet, the next number, or a new unchecked box (Shift+Enter for a plain new line); on an empty item: remove it |
 | `{` on a task line | start a `{key:value}` block: suggests `due`, `pri`, `start` and keys you've used, then values (dates like `today`, `fri`, `+3d` become `YYYY-MM-DD`) |
 | Ctrl+Space | on a task line: open those suggestions, adding the `{}` block if needed |
 | Ctrl+Shift+P / Ctrl+Shift+: | command palette, the same commands as the TUI's `:` (see [Command window](#command-window)) |

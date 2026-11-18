@@ -286,6 +286,32 @@ export function makeTask(line: string): string {
   return addBox(line).line;
 }
 
+// A list or task line: lead (indent and > quotes), bullet or number, and an
+// optional box. A plain item needs a space after its bullet ("- "), so a
+// lone "-" or a "---" rule isn't a list; a task's box may lack the space.
+const LIST_PARTS = /^(\s*(?:>\s*)*)(?:((?:[-*+]|\d+[.)])\s+)(?:(\[(?: |x|X)\])(?:\s+|$))?|(\[(?: |x|X)\])(?:\s+|$))/;
+
+// Enter on a list item or task line. An empty item is removed (the line is
+// cleared, so Enter leaves the list); otherwise the line is split at `col`
+// and the new line gets the same indent and bullet, the next number in a
+// numbered list, and an unchecked box when the line is a task. Returns the
+// text that replaces the line and the cursor column in it, or null for a
+// normal Enter (not a list, or the cursor is inside the bullet or box).
+export function continueList(line: string, col: number): { text: string; col: number } | null {
+  const m = line.match(LIST_PARTS);
+  if (!m) return null;
+  const head = m[0].length;
+  if (line.slice(head).trim() === '') return { text: '', col: 0 };
+  if (col < head) return null;
+  let bullet = m[2] ?? '';
+  const num = bullet.match(/^(\d+)([.)])(\s+)$/);
+  if (num) bullet = String(Number(num[1]) + 1) + num[2] + num[3];
+  const prefix = m[1] + bullet + (m[3] || m[4] ? '[ ] ' : '');
+  const before = line.slice(0, col).replace(/\s+$/, '');
+  const text = (col === head ? line.slice(0, head) : before) + '\n' + prefix + line.slice(col).replace(/^\s+/, '');
+  return { text, col: (col === head ? head : before.length) + 1 + prefix.length };
+}
+
 // Rewrite one line for the /todo trigger. `col` is the cursor column, right
 // after the "/todo" token. Returns the new line and cursor column, or null if
 // the text before the cursor doesn't end with a standalone /todo.

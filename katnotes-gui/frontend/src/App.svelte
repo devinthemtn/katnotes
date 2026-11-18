@@ -2,7 +2,7 @@
   import { onMount, tick } from 'svelte';
   import { marked } from 'marked';
   import DOMPurify from 'dompurify';
-  import { checkboxHTML, decorateTasks, toggleTask, makeTask, setTaskLine, setTaskMetaLine, metaChips, setStampDone, dateState, today, ensureMetaBlock } from './tasks';
+  import { checkboxHTML, decorateTasks, toggleTask, makeTask, continueList, setTaskLine, setTaskMetaLine, metaChips, setStampDone, dateState, today, ensureMetaBlock } from './tasks';
   import { metaContext, suggest, applySuggestion, shouldPairBrace, type MetaContext, type MetaStat, type Suggestion } from './metacomplete';
   import { SLASH, matchSlash, mergeSlash, slashQuery, slashToken, expandSlash, applyUserResult, caretXY, rank, type SlashCommand } from './slash';
   import { linkQuery, linkSuggestions, linkMarkdown, linkText, applyLink, decorateLinks, type NoteRef, type LinkSuggestion } from './links';
@@ -217,6 +217,7 @@
       ['/', `In the editor: slash commands (${SLASH.map((c) => c.name).join(', ')})`],
       ['/your-command', 'Lua commands from ~/.config/katnotes/commands/*.lua (:reload after editing)'],
       [`${modLabel}+Enter`, 'In the editor: make the line a task, or check/uncheck it'],
+      ['Enter', 'On a list item or task: continue the list below; on an empty one: remove it'],
       ['[[', 'In the editor: link to a page or journal day; saved as a Markdown link'],
       ['Click a link', 'In the preview: open the note (a missing one is created first)'],
       ['{', 'On a task line: start a {key:value} block; suggests due, pri, start and your keys, then values'],
@@ -1674,6 +1675,15 @@
       e.stopPropagation();
       taskifyLine();
       return;
+    }
+    if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && !e.isComposing) {
+      const cl = caretLine();
+      const r = cl && continueList(cl.text, cl.col);
+      if (cl && r) {
+        e.preventDefault();
+        replaceRange(cl.start, cl.end, r.text, cl.start + r.col);
+        return;
+      }
     }
     if (e.key === 'Tab' && bodyEl) {
       e.preventDefault();
