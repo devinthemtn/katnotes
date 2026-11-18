@@ -16,6 +16,7 @@ import (
 	"github.com/devinthemtn/katnotes/internal/luacmd"
 	"github.com/devinthemtn/katnotes/internal/notes"
 	"github.com/devinthemtn/katnotes/internal/recent"
+	"github.com/devinthemtn/katnotes/internal/theme"
 	"github.com/devinthemtn/katnotes/internal/viewstate"
 )
 
@@ -42,6 +43,9 @@ func NewNotesService() (*NotesService, error) {
 	}
 	if dir := (&commands.Env{}).TemplatesPath(); dir != "" {
 		notes.WriteExampleTemplate(dir) //nolint:errcheck // the example is a convenience
+	}
+	if dir := (&commands.Env{}).ThemesPath(); dir != "" {
+		theme.WriteDefaults(dir) //nolint:errcheck // the files are starting points
 	}
 	return s, s.reload()
 }
@@ -396,6 +400,30 @@ func (s *NotesService) OpenTerminal(kind, id string) error {
 	}
 	s.mu.Unlock()
 	return openTerminal(noteDir(path, root))
+}
+
+// ThemeInfo is the colour theme to show, from the `theme` option.
+type ThemeInfo struct {
+	Theme  theme.Theme `json:"theme"`
+	Option string      `json:"option"` // the option in effect: "auto" or a theme name
+	Names  []string    `json:"names"`  // every theme there is
+	Dir    string      `json:"dir"`    // the themes folder
+	Error  string      `json:"error"`  // a problem in the theme file (the theme still works)
+}
+
+// Theme resolves the GUI's theme (gui_theme, else theme); systemDark picks light or dark for
+// "auto". Theme files are re-read each call, so edits show without a restart.
+func (s *NotesService) Theme(systemDark bool) ThemeInfo {
+	s.mu.Lock()
+	option := s.cfg.ThemeFor(commands.AppGUI)
+	s.mu.Unlock()
+	dir := (&commands.Env{}).ThemesPath()
+	t, err := theme.Resolve(dir, option, systemDark)
+	info := ThemeInfo{Theme: t, Option: option, Names: theme.List(dir), Dir: dir}
+	if err != nil {
+		info.Error = err.Error()
+	}
+	return info
 }
 
 // ReloadConfig re-reads config.toml, picking up hand edits without a restart.

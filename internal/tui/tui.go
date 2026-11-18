@@ -22,20 +22,27 @@ import (
 	"github.com/devinthemtn/katnotes/internal/editor"
 	"github.com/devinthemtn/katnotes/internal/notes"
 	"github.com/devinthemtn/katnotes/internal/recent"
+	"github.com/devinthemtn/katnotes/internal/theme"
 	"github.com/devinthemtn/katnotes/internal/viewstate"
 )
 
 // Run starts the TUI.
 func Run(app *cli.App) error {
-	style := "light"
-	if lipgloss.HasDarkBackground() {
-		style = "dark"
-	}
+	termDark = lipgloss.HasDarkBackground()
+	t, themeErr := loadTheme(app.Cfg.ThemeFor(commands.AppTUI))
+	applyTheme(t)
+	style := glamourStyle()
 	env := commands.Env{}
+	if dir := env.ThemesPath(); dir != "" {
+		theme.WriteDefaults(dir) //nolint:errcheck // the files are starting points
+	}
 	if dir := env.TemplatesPath(); dir != "" {
 		notes.WriteExampleTemplate(dir) //nolint:errcheck // the example is a convenience
 	}
 	m := newModel(app, style)
+	if themeErr != nil {
+		m.setErr(themeErr)
+	}
 	_, err := tea.NewProgram(m, tea.WithAltScreen()).Run()
 	return err
 }
@@ -353,8 +360,7 @@ type model struct {
 }
 
 func newModel(app *cli.App, style string) model {
-	d := list.NewDefaultDelegate()
-	l := list.New(nil, d, 0, 0)
+	l := list.New(nil, newDelegate(), 0, 0)
 	l.SetShowTitle(false)
 	l.SetShowHelp(false)
 	l.SetShowStatusBar(false)
@@ -399,7 +405,7 @@ func (m *model) setItemHeight(items []list.Item) {
 			h = max(h, 1+strings.Count(ni.Description(), "\n")+1)
 		}
 	}
-	d := list.NewDefaultDelegate()
+	d := newDelegate()
 	d.SetHeight(h)
 	m.list.SetDelegate(d)
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/devinthemtn/katnotes/internal/config"
 	"github.com/devinthemtn/katnotes/internal/notes"
 	"github.com/devinthemtn/katnotes/internal/recent"
+	"github.com/devinthemtn/katnotes/internal/theme"
 	"github.com/devinthemtn/katnotes/internal/viewstate"
 )
 
@@ -107,6 +108,7 @@ type Env struct {
 	RecentPath   string // recently opened notes (internal/recent)
 	TemplatesDir string // page templates
 	ViewPath     string // sort orders and saved searches (internal/viewstate)
+	ThemesDir    string // colour themes (internal/theme)
 
 	// Search is the app's current search, for "search save".
 	Search CurrentSearch
@@ -132,6 +134,14 @@ func (e *Env) recentPath() string {
 	}
 	p, _ := recent.Path()
 	return p
+}
+
+// ThemesPath is the themes folder for e.
+func (e *Env) ThemesPath() string {
+	if e.ThemesDir != "" {
+		return e.ThemesDir
+	}
+	return theme.Dir()
 }
 
 // TemplatesPath is the page templates folder for e.
@@ -239,6 +249,9 @@ func init() {
 			{Name: "program", Kind: ArgText, Rest: true, complete: programs},
 		}},
 		{Name: "external", Desc: "Open the note in the system's default app", NeedsNote: true, UI: true, Apps: []string{AppGUI}},
+		{Name: "theme", Desc: "Set this app's colour theme (auto, light, dark, a file in themes/, or shared)", Args: []Arg{
+			{Name: "theme", Kind: ArgText, Optional: true, complete: themes},
+		}, run: runTheme},
 		{Name: "zoom", Desc: "Toggle focus mode (hide sidebar and top bar)", UI: true, Apps: []string{AppGUI}},
 		{Name: "reload", Desc: "Reload notes from disk", UI: true, Apps: []string{AppTUI}},
 		{Name: "reload", Desc: "Reload config.toml and Lua / commands", UI: true, Apps: []string{AppGUI}},

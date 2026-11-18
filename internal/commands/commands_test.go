@@ -374,3 +374,62 @@ func TestFuzzyOpenAndSavedSearches(t *testing.T) {
 		t.Error("deleted search still applies")
 	}
 }
+
+func TestThemeCommand(t *testing.T) {
+	env := newEnv(t) // App: tui
+	env.ThemesDir = t.TempDir()
+	os.WriteFile(filepath.Join(env.ThemesDir, "ocean.toml"), []byte("dark = true\n"), 0o644)
+	os.WriteFile(filepath.Join(env.ThemesDir, "broken.toml"), []byte("[colors]\naccent = \"nope\"\n"), 0o644)
+
+	// :theme in the TUI sets tui_theme only.
+	r, err := Run(env, "theme ocean")
+	if err != nil || r.UI != "theme" || !reflect.DeepEqual(r.Args, []string{"ocean"}) {
+		t.Fatalf("theme ocean: %+v %v", r, err)
+	}
+	cfg, _ := config.Load()
+	if cfg.TUITheme != "ocean" || cfg.Theme != "auto" || cfg.ThemeFor(AppGUI) != "auto" {
+		t.Errorf("after tui :theme ocean: %+v", cfg)
+	}
+	if r, err := Run(env, "theme"); err != nil || !strings.Contains(r.Status, "TUI theme: ocean") || r.UI != "" {
+		t.Errorf("theme with no name: %+v %v", r, err)
+	}
+
+	// The GUI gets its own.
+	gui := *env
+	gui.App = AppGUI
+	if r, err := Run(&gui, "theme light"); err != nil || r.Args[0] != "light" {
+		t.Fatalf("gui theme light: %+v %v", r, err)
+	}
+	cfg, _ = config.Load()
+	if cfg.GUITheme != "light" || cfg.ThemeFor(AppTUI) != "ocean" {
+		t.Errorf("after gui :theme light: %+v", cfg)
+	}
+
+	// shared clears the override: the app follows `theme` again.
+	if err := config.Set("theme", "dark"); err != nil {
+		t.Fatal(err)
+	}
+	if r, err := Run(env, "theme shared"); err != nil || r.Args[0] != "dark" || !strings.Contains(r.Status, "(shared)") {
+		t.Errorf("theme shared: %+v %v", r, err)
+	}
+	if cfg, _ := config.Load(); cfg.TUITheme != "" || cfg.ThemeFor(AppTUI) != "dark" || cfg.ThemeFor(AppGUI) != "light" {
+		t.Errorf("after shared: %+v", cfg)
+	}
+
+	if _, err := Run(env, "theme missing"); err == nil {
+		t.Error("missing theme accepted")
+	}
+	if _, err := Run(env, "theme broken"); err == nil {
+		t.Error("broken theme accepted")
+	}
+	if r, err := Run(env, "theme AUTO"); err != nil || r.Args[0] != "auto" {
+		t.Errorf("theme auto: %+v %v", r, err)
+	}
+	c := Complete(env, "theme oc")
+	if len(c.Items) != 1 || strings.TrimSpace(c.Items[0].Value) != "ocean" {
+		t.Errorf("completion: %+v", c.Items)
+	}
+	if c := Complete(env, "theme sh"); len(c.Items) != 1 || strings.TrimSpace(c.Items[0].Value) != "shared" {
+		t.Errorf("completion of shared: %+v", c.Items)
+	}
+}

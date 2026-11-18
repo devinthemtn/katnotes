@@ -49,6 +49,13 @@ type Config struct {
 	// TaskDoneDate stamps done:<date> into a task's {…} metadata when it is
 	// checked from KatNotes, and removes it when it is unchecked.
 	TaskDoneDate bool `toml:"task_done_date" json:"task_done_date"`
+	// Theme is the colour theme for both apps: a file name (without .toml)
+	// in the themes folder, or "auto" for the light / dark theme following
+	// the system (GUI) or the terminal background (TUI).
+	Theme string `toml:"theme" json:"theme"`
+	// TUITheme and GUITheme override Theme for one app; empty uses Theme.
+	TUITheme string `toml:"tui_theme" json:"tui_theme"`
+	GUITheme string `toml:"gui_theme" json:"gui_theme"`
 	// Font sets the GUI's fonts and base text size.
 	Font Font `toml:"font" json:"font"`
 }
@@ -82,6 +89,7 @@ func Default() Config {
 		DateFormat:      "2006-01-02",
 		StartPage:       "none",
 		TaskDoneDate:    true,
+		Theme:           "auto",
 		Font:            Font{Size: DefaultFontSize},
 	}
 }
@@ -141,6 +149,11 @@ func Load() (Config, error) {
 	if cfg.JournalTemplate == "" {
 		cfg.JournalTemplate = def.JournalTemplate
 	}
+	if cfg.Theme = strings.TrimSpace(cfg.Theme); cfg.Theme == "" {
+		cfg.Theme = def.Theme
+	}
+	cfg.TUITheme = strings.TrimSpace(cfg.TUITheme)
+	cfg.GUITheme = strings.TrimSpace(cfg.GUITheme)
 	if env := os.Getenv(EnvNotesDir); env != "" {
 		cfg.NotesDir = env
 	}
@@ -176,6 +189,28 @@ func Install() error {
 	return Save(Default())
 }
 
+// ThemeKey is the option that holds app's theme: "tui_theme", "gui_theme",
+// or "theme" for any other app.
+func ThemeKey(app string) string {
+	switch app {
+	case "tui", "gui":
+		return app + "_theme"
+	}
+	return "theme"
+}
+
+// ThemeFor is the theme option in effect for app ("tui" or "gui"): its own
+// override, else Theme.
+func (c Config) ThemeFor(app string) string {
+	switch {
+	case app == "tui" && c.TUITheme != "":
+		return c.TUITheme
+	case app == "gui" && c.GUITheme != "":
+		return c.GUITheme
+	}
+	return c.Theme
+}
+
 // ExpandHome replaces a leading ~ with the user's home directory.
 func ExpandHome(p string) string {
 	if p == "~" || strings.HasPrefix(p, "~/") {
@@ -187,7 +222,7 @@ func ExpandHome(p string) string {
 }
 
 // Keys lists the option names accepted by Set.
-var Keys = []string{"notes_dir", "editor", "previewer", "previewer_mode", "default_kind", "journal_template", "date_format", "open_with", "start_page", "frontmatter_collapsed", "task_done_date", "font.body", "font.mono", "font.size"}
+var Keys = []string{"notes_dir", "editor", "previewer", "previewer_mode", "default_kind", "journal_template", "date_format", "open_with", "start_page", "frontmatter_collapsed", "task_done_date", "theme", "tui_theme", "gui_theme", "font.body", "font.mono", "font.size"}
 
 // Set updates one option in the config file. It edits the file's own values,
 // not the env-overridden view returned by Load.
@@ -241,6 +276,22 @@ func Set(key, value string) error {
 			return fmt.Errorf("task_done_date must be true or false, got %q", value)
 		}
 		cfg.TaskDoneDate = b
+	case "theme", "tui_theme", "gui_theme":
+		v := strings.TrimSuffix(strings.TrimSpace(value), ".toml")
+		if strings.ContainsAny(v, `/\ `) || strings.HasPrefix(v, ".") {
+			return fmt.Errorf("%s must be auto or a theme file name (without .toml), got %q", key, value)
+		}
+		switch key {
+		case "theme":
+			if v == "" {
+				v = "auto"
+			}
+			cfg.Theme = v
+		case "tui_theme":
+			cfg.TUITheme = v // "" follows theme
+		case "gui_theme":
+			cfg.GUITheme = v
+		}
 	case "font.body":
 		cfg.Font.Body = strings.TrimSpace(value)
 	case "font.mono":

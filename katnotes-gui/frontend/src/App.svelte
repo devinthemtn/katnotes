@@ -9,6 +9,7 @@
   import EditorMenu from './EditorMenu.svelte';
   import { Browser, Clipboard } from '@wailsio/runtime';
   import { NotesService as api } from '../bindings/github.com/devinthemtn/katnotes/katnotes-gui';
+  import type { ThemeInfo } from '../bindings/github.com/devinthemtn/katnotes/katnotes-gui/models';
   import type { Note, Match, TagCount, NoteTasks, Task, Backlink } from '../bindings/github.com/devinthemtn/katnotes/internal/notes';
   import type { Config } from '../bindings/github.com/devinthemtn/katnotes/internal/config';
   import type { State as ViewStateT, Search as SavedSearch } from '../bindings/github.com/devinthemtn/katnotes/internal/viewstate';
@@ -630,10 +631,34 @@
     root.setProperty('--size', `${c?.font?.size || 14}px`);
   }
 
+  // Colour theme (internal/theme, shared with the TUI): its colours become
+  // the CSS variables, e.g. accent_soft -> --accent-soft. "auto" follows the
+  // system's light / dark setting. Theme files are re-read every time, so
+  // edits show when the window regains focus.
+  const darkQuery = window.matchMedia('(prefers-color-scheme: dark)');
+  let themeInfo: ThemeInfo | null = $state(null);
+  let themeErrShown = '';
+  async function applyTheme() {
+    try {
+      const info = await api.Theme(darkQuery.matches);
+      themeInfo = info;
+      const root = document.documentElement.style;
+      for (const [k, v] of Object.entries(info.theme.colors ?? {})) {
+        if (v) root.setProperty('--' + k.replace(/_/g, '-'), v);
+      }
+      root.setProperty('color-scheme', info.theme.dark ? 'dark' : 'light');
+      if (info.error && info.error !== themeErrShown) flash(info.error, true);
+      themeErrShown = info.error;
+    } catch (e) {
+      flash(errMsg(e), true);
+    }
+  }
+
   async function reloadConfig() {
     try {
       const c = await api.ReloadConfig();
       applyFonts(c);
+      await applyTheme();
       fmOpen = !c.frontmatter_collapsed;
       setStampDone(c.task_done_date !== false);
       if (settingsOpen) cfg = c;
@@ -704,6 +729,7 @@
       await loadInfo();
       cfg = await api.GetConfig();
       applyFonts(cfg);
+      if (key.endsWith('theme')) await applyTheme();
       flash(`saved ${key}`);
     } catch (e) {
       flash(errMsg(e), true);
@@ -743,6 +769,7 @@
 
   // Pick up edits made by the CLI/TUI when the window regains focus.
   async function onFocus() {
+    applyTheme();
     await refreshList();
     loadLinkTargets();
     loadBacklinks();
@@ -871,6 +898,17 @@
     zoom: toggleZoom,
     external: openExternal,
     terminal: openTerminal,
+    theme: async (r) => {
+      try {
+        const c = await api.ReloadConfig();
+        if (settingsOpen) cfg = c;
+      } catch (e) {
+        flash(errMsg(e), true);
+        return;
+      }
+      await applyTheme();
+      if (!themeInfo?.error) flash(r.status || 'theme changed');
+    },
     'open-with': openWith,
     tasks: (r) => {
       for (const a of (r.args ?? []).map((x) => x.toLowerCase())) {
@@ -1662,11 +1700,14 @@
     loadViewState().then(refreshList);
     api.Commands().then((c) => { cmdCatalog = (c ?? []).filter((x): x is CmdSpec => !!x); }).catch(() => {});
     window.addEventListener('focus', onFocus);
+    applyTheme();
+    darkQuery.addEventListener('change', applyTheme);
     // Ctrl+Shift+Z is bound in main.go (Wails swallows it on Linux).
     window.addEventListener('katnotes:toggle-zoom', toggleZoom);
     window.addEventListener('beforeunload', () => { if (dirty) save(); });
     return () => {
       stopExternalWatch();
+      darkQuery.removeEventListener('change', applyTheme);
       window.removeEventListener('focus', onFocus);
       window.removeEventListener('katnotes:toggle-zoom', toggleZoom);
     };
@@ -2207,6 +2248,26 @@
           {/if}
         </div>
       </label>
+      <div class="row font-row">
+        <label>Shared theme
+          <select value={cfg.theme || 'auto'} onchange={(e) => saveSetting('theme', (e.target as HTMLSelectElement).value)}>
+            <option value="auto">Auto (light or dark, following the system)</option>
+            {#each themeInfo?.names ?? ['dark', 'light'] as name (name)}
+              <option value={name}>{name}</option>
+            {/each}
+          </select>
+        </label>
+        <label>GUI theme
+          <select value={cfg.gui_theme ?? ''} onchange={(e) => saveSetting('gui_theme', (e.target as HTMLSelectElement).value)}>
+            <option value="">Same as shared ({cfg.theme || 'auto'})</option>
+            <option value="auto">Auto (light or dark, following the system)</option>
+            {#each themeInfo?.names ?? ['dark', 'light'] as name (name)}
+              <option value={name}>{name}</option>
+            {/each}
+          </select>
+        </label>
+      </div>
+      {#if themeInfo?.dir}<p class="hint">The shared theme is used by the TUI and the GUI unless one sets its own (the TUI: <code>:theme</code> or <code>tui_theme</code>). Themes are .toml files in {themeInfo.dir}; copy light.toml or dark.toml to make your own.</p>{/if}
       <div class="row font-row">
         <label>Body font
           <input value={cfg.font?.body ?? ''} placeholder="system default" onchange={(e) => saveSetting('font.body', (e.target as HTMLInputElement).value)} />

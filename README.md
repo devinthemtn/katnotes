@@ -15,6 +15,7 @@ Every frontend goes through the same `internal/notes` package, so they all read 
 | Options | `$XDG_CONFIG_HOME/katnotes/config.toml` (usually `~/.config/katnotes/config.toml`) |
 | Lua `/` commands (GUI) | `~/.config/katnotes/commands/<name>.lua` |
 | Page templates | `~/.config/katnotes/templates/<name>.md` (an example `meeting.md` is written on first run) |
+| Colour themes | `~/.config/katnotes/themes/<name>.toml` (`light.toml` and `dark.toml` are written on first run), shared by the TUI and the GUI |
 | Command history, recent notes | `~/.config/katnotes/command_history` and `~/.config/katnotes/recent`, shared by the TUI and the GUI |
 | Sort orders, saved searches | `~/.config/katnotes/view.json`, shared by the TUI and the GUI |
 
@@ -50,6 +51,9 @@ task_done_date = true       # checking a task adds {done:YYYY-MM-DD}
 
 start_page = "none"         # none, last, today, page/<id> or journal/<id> (last: the latest note opened in either app)
 frontmatter_collapsed = false  # GUI table / TUI preview start folded (TUI: F toggles)
+theme = "auto"              # auto (light or dark, following the system / terminal) or a file name in themes/
+tui_theme = ""              # the TUI's own theme; empty uses theme
+gui_theme = ""              # the GUI's own theme; empty uses theme
 
 # GUI only
 open_with = ""              # app for Ctrl+Shift+O; empty = system default (xdg-open / open / start)
@@ -61,6 +65,19 @@ size = 14                   # base text size in px (8-40)
 ```
 
 To change these, run `katnotes config set <key> <value>` (use `font.size` etc. for the `[font]` table), open the file with `katnotes config edit`, or use the GUI's Settings dialog. In the GUI, `:reload` in the command palette picks up hand edits.
+
+### Themes
+
+Each `.toml` file in `~/.config/katnotes/themes/` is a colour theme, named after the file. The first time either app runs, it writes `light.toml` and `dark.toml` there: every colour, each with a comment saying what it colours. Edit them, or copy one to `ocean.toml` and change what you like. Colours you leave out come from the built-in light or dark theme, whichever `dark = true/false` picks, so a theme can be just a few lines:
+
+```toml
+dark = true
+[colors]
+accent = "#2ec4b6"
+heading = "#2ec4b6"
+```
+
+`theme = "auto"` uses the themes named `light` and `dark`, following the system setting in the GUI and the terminal background in the TUI. Both apps use `theme` unless `tui_theme` or `gui_theme` gives one its own. `:theme <name>` sets the theme of the app you type it in (its `tui_theme` / `gui_theme`), and `:theme shared` clears that so the app follows `theme` again. You can also use `katnotes config set theme <name>` (or `tui_theme` / `gui_theme`), or the shared and GUI pickers in the GUI's Settings. The GUI re-reads theme files when its window regains focus, so edits show straight away; the TUI applies them on `:theme` or the next start. A theme file with a mistake still loads (bad values keep the built-in colour) and the app says what's wrong. The TUI uses the theme's accent, muted, border, heading and status colours, and keeps your terminal's own background and text colours.
 
 ## Finding notes
 
@@ -260,6 +277,7 @@ return {
 | `tasks [open\|done\|all] [any\|overdue\|week]` | the all-tasks view with those filters |
 | `sync` | git: commit every change in the notes folder, then pull (rebase) and push if the branch has an upstream |
 | `git status` | git: the notes changed since the last commit |
+| `theme [name]` | set this app's colour theme (`auto`, `light`, `dark`, your own, or `shared` to follow the `theme` option; see Themes); with no name, show the current one |
 | `sync-tasks`, `terminal`, `reload`, `help` | as in each app; the GUI also has `zoom` and `external`, the TUI `quit` |
 
 Tab completes the command and then each argument: note titles, tags in use (tags the note already has are left out), frontmatter fields and values already used in other notes, and journal days. ↑↓ choose a suggestion, and Enter runs the line. If you picked a suggestion with ↑↓, Enter uses it.

@@ -9,6 +9,10 @@
   --accent-soft: #ece6fe;
   --danger: #c43c55;
   --code-bg: #f0eee9;
+  --accent-text: #ffffff;
+  --heading: #7d56f4;
+  --warning: #c08a1e;
+  --info: #3d6fd8;
   --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --mono: ui-monospace, "JetBrains Mono", "Fira Code", Menlo, monospace;
   --size: 14px;
@@ -26,6 +30,10 @@
     --accent-soft: #2c2547;
     --danger: #f7768e;
     --code-bg: #262531;
+    --accent-text: #ffffff;
+    --heading: #9d7df8;
+    --warning: #e0af68;
+    --info: #7aa2f7;
     color-scheme: dark;
   }
 }
@@ -43,7 +51,7 @@ button {
   cursor: pointer;
 }
 button:hover { border-color: var(--accent); }
-button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
 button.danger { color: var(--danger); }
 button.danger:hover { border-color: var(--danger); }
 button.link { background: none; border: none; color: var(--accent); padding: 0 4px; }
@@ -119,7 +127,7 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); }
 .seg button:last-child { border-radius: 0 6px 6px 0; }
 .seg button.active { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); position: relative; }
 .save { font-size: 12px; color: var(--muted); min-width: 64px; }
-.save.dirty { color: #c08a1e; }
+.save.dirty { color: var(--warning); }
 .save.error { color: var(--danger); }
 .conflict {
   background: var(--accent-soft);
@@ -235,8 +243,8 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); }
   justify-content: space-between;
   gap: 12px;
   padding: 16px 20px;
-  background: linear-gradient(135deg, var(--accent), #5b3fd1);
-  color: #fff;
+  background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 72%, black));
+  color: var(--accent-text);
   flex-shrink: 0;
 }
 .help-title { font-size: 18px; font-weight: 700; }
@@ -340,7 +348,7 @@ kbd {
 .preview input.task:checked, .tasks-view input.task:checked { background: var(--accent); border-color: var(--accent); }
 .preview input.task:checked::after, .tasks-view input.task:checked::after {
   content: ""; position: absolute; left: 4.5px; top: 1px; width: 4px; height: 8px;
-  border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg);
+  border: solid var(--accent-text); border-width: 0 2px 2px 0; transform: rotate(45deg);
 }
 .preview li:has(> input.task) { list-style: none; margin-left: -1.4em; }
 .preview li:has(> input.task:checked) { color: var(--muted); text-decoration: line-through; }
@@ -436,5 +444,5 @@ kbd {
 .meta-chip.overdue { color: var(--danger); border-color: var(--danger); }
 .meta-chip.due-today { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
 .meta-chip.pri-high { color: var(--danger); border-color: var(--danger); font-weight: 600; }
-.meta-chip.pri-med { color: #c58a1a; border-color: #c58a1a; }
+.meta-chip.pri-med { color: var(--warning); border-color: var(--warning); }
 .meta-chip.not-started { font-style: italic; }

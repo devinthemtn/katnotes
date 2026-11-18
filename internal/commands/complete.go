@@ -5,9 +5,11 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/devinthemtn/katnotes/internal/config"
 	"github.com/devinthemtn/katnotes/internal/editor"
 	"github.com/devinthemtn/katnotes/internal/notes"
 	"github.com/devinthemtn/katnotes/internal/recent"
+	"github.com/devinthemtn/katnotes/internal/theme"
 	"github.com/devinthemtn/katnotes/internal/viewstate"
 )
 
@@ -371,6 +373,28 @@ func noteFields(env *Env, _ []string) []Suggestion {
 	sort.Strings(keys)
 	for _, k := range keys {
 		out = append(out, Suggestion{Value: k, Label: k, Detail: FieldText(env.Note, k)})
+	}
+	return out
+}
+
+// themes suggests "auto", the theme names in the themes folder and
+// "shared".
+func themes(env *Env, _ []string) []Suggestion {
+	cur, shared := "", ""
+	if cfg, err := config.Load(); err == nil {
+		cur, shared = cfg.ThemeFor(env.App), cfg.Theme
+	}
+	out := []Suggestion{{Value: theme.Auto, Label: theme.Auto, Detail: "light or dark, following the system"}}
+	for _, n := range theme.List(env.ThemesPath()) {
+		out = append(out, Suggestion{Value: n, Label: n, Detail: "theme"})
+	}
+	for i := range out {
+		if out[i].Value == cur {
+			out[i].Detail = "current"
+		}
+	}
+	if env.App == AppTUI || env.App == AppGUI {
+		out = append(out, Suggestion{Value: themeShared, Label: themeShared, Detail: "follow the theme option (now " + shared + "), like the other app"})
 	}
 	return out
 }

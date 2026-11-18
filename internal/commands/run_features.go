@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/devinthemtn/katnotes/internal/config"
 	"github.com/devinthemtn/katnotes/internal/gitsync"
 	"github.com/devinthemtn/katnotes/internal/notes"
 	"github.com/devinthemtn/katnotes/internal/recent"
+	"github.com/devinthemtn/katnotes/internal/theme"
 	"github.com/devinthemtn/katnotes/internal/viewstate"
 )
 
@@ -20,6 +22,67 @@ func runNewFrom(env *Env, args []string) (Result, error) {
 		return Result{}, err
 	}
 	return Result{Note: n, Changed: true, Edit: true, Status: "created " + key(n) + " from " + args[0]}, nil
+}
+
+// themeShared is the ":theme" value that clears this app's own theme, so it
+// follows the shared `theme` option again.
+const themeShared = "shared"
+
+// appLabel names env's app for messages.
+func appLabel(app string) string {
+	switch app {
+	case AppTUI:
+		return "TUI"
+	case AppGUI:
+		return "GUI"
+	}
+	return "app"
+}
+
+// themeStatus describes the theme in effect for app.
+func themeStatus(cfg config.Config, app string) string {
+	own := map[string]string{AppTUI: cfg.TUITheme, AppGUI: cfg.GUITheme}
+	if v, ok := own[app]; ok && v == "" {
+		return appLabel(app) + " theme: " + cfg.Theme + " (shared)"
+	}
+	return appLabel(app) + " theme: " + cfg.ThemeFor(app)
+}
+
+// runTheme sets this app's theme (tui_theme / gui_theme in config.toml);
+// "shared" clears it so the app follows `theme`. The frontend then applies
+// it (Result.UI "theme", Args the option now in effect). With no name it
+// says which theme is in use.
+func runTheme(env *Env, args []string) (Result, error) {
+	dir := env.ThemesPath()
+	avail := "auto, " + strings.Join(theme.List(dir), ", ")
+	if len(args) == 0 || strings.TrimSpace(args[0]) == "" {
+		cfg, err := config.Load()
+		if err != nil {
+			return Result{}, err
+		}
+		return Result{Status: themeStatus(cfg, env.App) + " · available: " + avail}, nil
+	}
+	name := strings.TrimSuffix(strings.TrimSpace(args[0]), ".toml")
+	switch {
+	case strings.EqualFold(name, themeShared):
+		name = ""
+	case strings.EqualFold(name, theme.Auto):
+		name = theme.Auto
+	case !theme.Exists(dir, name):
+		return Result{}, fmt.Errorf("no theme %q: available are %s, or shared", name, avail)
+	default:
+		if _, err := theme.Load(dir, name); err != nil {
+			return Result{}, err
+		}
+	}
+	if err := config.Set(config.ThemeKey(env.App), name); err != nil {
+		return Result{}, err
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return Result{}, err
+	}
+	return Result{Status: themeStatus(cfg, env.App), UI: "theme", Args: []string{cfg.ThemeFor(env.App)}}, nil
 }
 
 func runRecent(env *Env, _ []string) (Result, error) {
