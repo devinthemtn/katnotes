@@ -14,6 +14,8 @@ Every frontend goes through the same `internal/notes` package, so they all read 
 | Notes | `~/KatNotes/pages/<slug>.md` and `~/KatNotes/journal/YYYY-MM-DD.md` |
 | Options | `$XDG_CONFIG_HOME/katnotes/config.toml` (usually `~/.config/katnotes/config.toml`) |
 | Lua `/` commands (GUI) | `~/.config/katnotes/commands/<name>.lua` |
+| Page templates | `~/.config/katnotes/templates/<name>.md` (an example `meeting.md` is written on first run) |
+| Command history, recent notes | `~/.config/katnotes/command_history` and `~/.config/katnotes/recent`, shared by the TUI and the GUI |
 
 You can override the notes folder with `notes_dir` in the config, `$KATNOTES_DIR`, or `--dir`.
 
@@ -45,10 +47,11 @@ journal_template = "# {{.Date}}\n\n"   # fields: .Date .ID .Weekday .Time
 date_format = "2006-01-02"  # Go time layout for journal titles
 task_done_date = true       # checking a task adds {done:YYYY-MM-DD}
 
+start_page = "none"         # none, last, today, page/<id> or journal/<id> (last: the latest note opened in either app)
+frontmatter_collapsed = false  # GUI table / TUI preview start folded (TUI: F toggles)
+
 # GUI only
 open_with = ""              # app for Ctrl+Shift+O; empty = system default (xdg-open / open / start)
-start_page = "none"         # none, last, today, page/<id> or journal/<id>
-frontmatter_collapsed = false
 
 [font]                      # GUI fonts; empty families use the system ones
 body = ""                   # e.g. "Inter Variable"
@@ -120,6 +123,9 @@ Find links with grep: `rg '\(\.\./pages/groceries\.md' ~/KatNotes`.
 katnotes                       # TUI
 katnotes new "Title" -t a,b    # new page, opens $EDITOR (--no-edit, -m "body", -m - for stdin)
 katnotes new -j [YYYY-MM-DD]   # new journal entry
+katnotes new --template meeting "Standup"   # new page from ~/.config/katnotes/templates/meeting.md
+katnotes todo call Sam {due:fri}            # add a task to today's journal (--here <id> for another note)
+katnotes sync                  # git: commit the notes folder, then pull --rebase and push
 katnotes today                 # open or create today's journal entry
 katnotes ls [-p|-j] [-t tag] [-s updated|title|id]
 katnotes show <id>             # also accepts: today, yesterday, or a page title
@@ -153,9 +159,11 @@ Every command accepts `--json` for scripting.
 | `t` | filter by tag (`enter` on the Tags tab does the same) |
 | `esc` | clear filters |
 | `J` / `K` | scroll the preview |
-| `:` | command window with completion (`:sync-tasks`, `:tasks`, `:terminal`, `:reload`, …) |
+| `:` | command window: `:open`, `:tag add`, `:set`, `:frontmatter`, … with completion (see [Command window](#command-window)) |
 | `v` | Tasks tab: switch between notes with tasks and all tasks |
-| `a` | Tasks tab: show or hide done tasks |
+| `a` | all tasks: cycle open → done → all |
+| `w` | all tasks: cycle any date → overdue → due this week |
+| `F` | show or collapse the frontmatter above the preview |
 | `x` / space | Tasks tab: check or uncheck the selected task |
 | `@` | all tasks: set the due date (`2026-11-20`, `today`, `tom`, `fri`, `+3d`, `+2w`; empty clears) |
 | `p` | all tasks: cycle priority (high → med → low → none) |
@@ -184,7 +192,7 @@ If a note is changed outside the app (by the CLI, the TUI or another editor), th
 | Ctrl+Enter | make the line a task, or check/uncheck it |
 | `{` on a task line | start a `{key:value}` block: suggests `due`, `pri`, `start` and keys you've used, then values (dates like `today`, `fri`, `+3d` become `YYYY-MM-DD`) |
 | Ctrl+Space | on a task line: open those suggestions, adding the `{}` block if needed |
-| Ctrl+Shift+P / Ctrl+Shift+: | command palette (zoom, open, terminal, tasks, reload) |
+| Ctrl+Shift+P / Ctrl+Shift+: | command palette, the same commands as the TUI's `:` (see [Command window](#command-window)) |
 | Ctrl+Shift+T | all tasks from every note: filter by due date, sort by due, set the due date and priority per task |
 | Ctrl+Shift+O | open the note in the default app (`open_with`) |
 | Ctrl+Shift+Z | zoom: hide the sidebar and top bar |
@@ -204,6 +212,57 @@ return {
   end,                                          -- { line = "…", cursor = n } replaces the line
 }
 ```
+
+## Command window
+
+`:` in the TUI and Ctrl+Shift+P in the GUI open the same command window. Both apps share the command list, argument completion and history. Commands that act on a note use the selected note (TUI) or the open one (GUI).
+
+| Command | What it does |
+|---|---|
+| `open <note>` | go to a note by title (a unique part of the title is enough; `page/id` works too) |
+| `new <title>` | create a page and start editing it |
+| `journal [day]` | open a journal day: `today` (default), `yesterday`, `tomorrow`, `-3`, `+1` or `2026-11-20` |
+| `tag add <tag…>` / `tag rm <tag…>` | add or remove tags |
+| `set <field> <value>` | set a frontmatter field, adding frontmatter to files that have none. Values are YAML, so `true`, `3` and `[a, b]` keep their types; `set title …` renames, `set tags …` replaces the tags |
+| `unset <field>` | remove a frontmatter field |
+| `rename <title>` | rename the note and update links to it |
+| `frontmatter` | edit all of the note's frontmatter as YAML (in `$EDITOR` in the TUI, in a dialog in the GUI) |
+| `copy-link` | copy a Markdown link to the note |
+| `links` / `backlinks` | notes this note links to, or that link to it |
+| `delete` | delete the note (asks first) |
+| `todo <task>` / `todo here <task>` | add `- [ ] task` to today's journal (or this note) without opening an editor; `{due:fri pri:h}` works like in the editor |
+| `pin` / `unpin` | keep the note at the top of the list (`pinned: true` in its frontmatter; shown with 📌) |
+| `new from <template> <title>` | create a page from a template (see below) |
+| `recent` | the notes you opened lately, in either app |
+| `tasks [open\|done\|all] [any\|overdue\|week]` | the all-tasks view with those filters |
+| `sync` | git: commit every change in the notes folder, then pull (rebase) and push if the branch has an upstream |
+| `git status` | git: the notes changed since the last commit |
+| `sync-tasks`, `terminal`, `reload`, `help` | as in each app; the GUI also has `zoom` and `external`, the TUI `quit` |
+
+Tab completes the command and then each argument: note titles, tags in use (tags the note already has are left out), frontmatter fields and values already used in other notes, and journal days. ↑↓ choose a suggestion, and Enter runs the line. If you picked a suggestion with ↑↓, Enter uses it.
+
+Lists that commands return (`recent`, `git status`, `links`, `backlinks`) open in the palette in the GUI and in the list pane in the TUI. Enter opens a note, and Esc closes the list.
+
+On an empty prompt, ↑ steps back through earlier commands and the most recent ones are listed first. The history is shared by the TUI and the GUI and is kept in `command_history` in the config directory.
+
+### Page templates
+
+Every `.md` file in `~/.config/katnotes/templates/` is a template for `new from <name> <title>`, the GUI's new-page dialog and `katnotes new --template`. Templates are Go text/templates with `{{.Title}}`, `{{.Date}}`, `{{.ID}}` (today as YYYY-MM-DD), `{{.Weekday}}` and `{{.Time}}`. Frontmatter in a template (tags, `status: draft`…) is copied to the new page:
+
+```markdown
+---
+tags: [meeting]
+---
+# {{.Title}}
+
+{{.Weekday}} {{.Date}} · {{.Time}}
+
+## Notes
+```
+
+### Git sync
+
+If the notes folder is in a git repository, `:sync` (or `katnotes sync`) commits everything in it as `katnotes sync <date time>`. When the branch has an upstream, it then pulls with `--rebase --autostash` and pushes. Only the notes folder is committed, even when it sits inside a bigger repository. Git never prompts for a password, so use an SSH key or a credential helper. Run `git push -u <remote> <branch>` once to set up the upstream.
 
 ## Building
 

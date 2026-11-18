@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 )
 
 // TaskKey is the frontmatter key set to true while a note's body contains a
@@ -278,12 +279,51 @@ type TaskFilter struct {
 	IncludeDone bool `json:"includeDone,omitempty"`
 	// Kind limits the notes searched; empty means all kinds.
 	Kind Kind `json:"kind,omitempty"`
+	// When is "" (any), "overdue" (due before Today) or "week" (due within
+	// 7 days of Today, overdue included). Tasks without a due date only pass
+	// "". The GUI's taskVisible does the same in TypeScript.
+	When string `json:"when,omitempty"`
+	// Today is the YYYY-MM-DD date When is measured from (default: today).
+	Today string `json:"today,omitempty"`
+	// OnlyDone keeps checked tasks only (implies IncludeDone).
+	OnlyDone bool `json:"onlyDone,omitempty"`
 }
+
+// TaskWhen values for TaskFilter.When.
+const (
+	WhenAny     = ""
+	WhenOverdue = "overdue"
+	WhenWeek    = "week"
+)
 
 // Match reports whether t passes the filter.
 func (f TaskFilter) Match(t Task) bool {
-	if t.Done && !f.IncludeDone {
+	if t.Done && !f.IncludeDone && !f.OnlyDone {
 		return false
+	}
+	if f.OnlyDone && !t.Done {
+		return false
+	}
+	if f.When != WhenAny {
+		d, ok := t.Meta[MetaDue]
+		if !ok {
+			return false
+		}
+		today := f.Today
+		if today == "" {
+			today = time.Now().Format(DateLayout)
+		}
+		switch f.When {
+		case WhenOverdue:
+			if d >= today {
+				return false
+			}
+		case WhenWeek:
+			day, err := time.ParseInLocation(DateLayout, today, time.Local)
+			if err != nil || d > day.AddDate(0, 0, 7).Format(DateLayout) {
+				return false
+			}
+		}
 	}
 	if f.DueBefore != "" {
 		d, ok := t.Meta[MetaDue]

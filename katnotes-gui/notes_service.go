@@ -12,9 +12,11 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 
 	"github.com/devinthemtn/katnotes/internal/cli"
+	"github.com/devinthemtn/katnotes/internal/commands"
 	"github.com/devinthemtn/katnotes/internal/config"
 	"github.com/devinthemtn/katnotes/internal/luacmd"
 	"github.com/devinthemtn/katnotes/internal/notes"
+	"github.com/devinthemtn/katnotes/internal/recent"
 )
 
 // NotesService exposes the shared notes.Store to the Svelte frontend. Every
@@ -37,6 +39,9 @@ func NewNotesService() (*NotesService, error) {
 	s := &NotesService{}
 	if dir, err := commandsDir(); err == nil {
 		luacmd.WriteExample(dir) //nolint:errcheck // the example is a convenience
+	}
+	if dir := (&commands.Env{}).TemplatesPath(); dir != "" {
+		notes.WriteExampleTemplate(dir) //nolint:errcheck // the example is a convenience
 	}
 	return s, s.reload()
 }
@@ -166,6 +171,7 @@ func (s *NotesService) Rename(kind, id, title string) (*RenameResult, error) {
 	if n == nil {
 		return nil, err
 	}
+	renameRecent(kind+"/"+id, string(n.Kind)+"/"+n.ID)
 	return &RenameResult{Note: n, Updated: updated}, err
 }
 
@@ -199,7 +205,11 @@ func (s *NotesService) Delete(kind, id string) error {
 	if err != nil {
 		return err
 	}
-	return st.Delete(k, id)
+	if err := st.Delete(k, id); err != nil {
+		return err
+	}
+	forgetRecent(kind + "/" + id)
+	return nil
 }
 
 // Today returns today's journal entry, creating it if needed.
@@ -428,4 +438,189 @@ func (s *NotesService) EnsureNote(kind, id, title string) (*notes.Note, error) {
 	}
 	n, _, err := st.Ensure(k, id, title)
 	return n, err
+}
+
+// ---- ":" command palette (shared catalog in internal/commands) ----
+
+// cmdEnv builds the command environment for the open note (kind/id may be
+// empty). The caller holds s.mu.
+func (s *NotesService) cmdEnv(st *notes.Store, kind, id string) *commands.Env {
+	env := &commands.Env{Store: st, App: commands.AppGUI}
+	if p, err := commands.HistoryPath(); err == nil {
+		env.History = commands.LoadHistory(p)
+	}
+	if kind != "" && id != "" {
+		if k, err := notes.ParseKind(kind); err == nil {
+			if n, err := st.Get(k, id); err == nil {
+				env.Note = n
+			}
+		}
+	}
+	return env
+}
+
+// Commands lists the palette's commands for the GUI, in display order.
+func (s *NotesService) Commands() []*commands.Spec { return commands.Catalog(commands.AppGUI) }
+
+// CompleteCommand returns completions for a partly typed command line, with
+// kind/id the open note (empty when none).
+func (s *NotesService) CompleteCommand(input, kind, id string) commands.Completion {
+	st := s.lock()
+	defer s.mu.Unlock()
+	c := commands.Complete(s.cmdEnv(st, kind, id), input)
+	if c.Items == nil {
+		c.Items = []commands.Suggestion{}
+	}
+	return c
+}
+
+// RunCommand runs a command line against the open note and records it in
+// the shared history. UI commands come back with Result.UI set. Slow
+// commands (Spec.Long: git sync) run without holding the store lock, so the
+// window stays usable meanwhile.
+func (s *NotesService) RunCommand(input, kind, id string) (commands.Result, error) {
+	st := s.lock()
+	env := s.cmdEnv(st, kind, id)
+	if p, err := commands.Parse(commands.AppGUI, input); err == nil && p.Spec.Long {
+		s.mu.Unlock()
+	} else {
+		defer s.mu.Unlock()
+	}
+	r, err := commands.Run(env, input)
+	if err != nil {
+		return r, err
+	}
+	if p, perr := commands.HistoryPath(); perr == nil {
+		commands.AddHistory(p, input) //nolint:errcheck // history is a convenience
+	}
+	if r.Pick == nil {
+		r.Pick = []commands.Choice{}
+	}
+	if r.Relinked == nil {
+		r.Relinked = []string{}
+	}
+	if r.Args == nil {
+		r.Args = []string{}
+	}
+	return r, nil
+}
+
+// CommandHistory returns recent command lines, newest first.
+func (s *NotesService) CommandHistory() []string {
+	p, err := commands.HistoryPath()
+	if err != nil {
+		return []string{}
+	}
+	return commands.LoadHistory(p)
+}
+
+// FrontmatterDoc is a note's frontmatter as editable YAML.
+type FrontmatterDoc struct {
+	YAML     string `json:"yaml"`
+	Inferred bool   `json:"inferred"` // the file has no frontmatter; values were worked out from it
+}
+
+// FrontmatterText returns a note's frontmatter as YAML (without --- lines).
+func (s *NotesService) FrontmatterText(kind, id string) (FrontmatterDoc, error) {
+	st := s.lock()
+	defer s.mu.Unlock()
+	k, err := notes.ParseKind(kind)
+	if err != nil {
+		return FrontmatterDoc{}, err
+	}
+	n, err := st.Get(k, id)
+	if err != nil {
+		return FrontmatterDoc{}, err
+	}
+	has, err := st.HasFrontmatter(k, id)
+	if err != nil {
+		return FrontmatterDoc{}, err
+	}
+	y, err := notes.FrontmatterYAML(n)
+	return FrontmatterDoc{YAML: string(y), Inferred: !has}, err
+}
+
+// ApplyFrontmatter replaces a note's frontmatter with the given YAML. A new
+// title renames the note, as with Rename.
+func (s *NotesService) ApplyFrontmatter(kind, id, text string) (*RenameResult, error) {
+	st := s.lock()
+	defer s.mu.Unlock()
+	k, err := notes.ParseKind(kind)
+	if err != nil {
+		return nil, err
+	}
+	n, err := st.Get(k, id)
+	if err != nil {
+		return nil, err
+	}
+	r, relinked, err := st.ApplyFrontmatter(n, []byte(text))
+	if err != nil {
+		return nil, err
+	}
+	renameRecent(kind+"/"+id, string(r.Kind)+"/"+r.ID)
+	if relinked == nil {
+		relinked = []string{}
+	}
+	return &RenameResult{Note: r, Updated: relinked}, nil
+}
+
+// ---- recent notes (shared with the TUI) and page templates ----
+
+func forgetRecent(key string) {
+	if p, err := recent.Path(); err == nil {
+		recent.Forget(p, key) //nolint:errcheck // a convenience
+	}
+}
+
+func renameRecent(from, to string) {
+	if from == to {
+		return
+	}
+	if p, err := recent.Path(); err == nil {
+		recent.Rename(p, from, to) //nolint:errcheck // a convenience
+	}
+}
+
+// TouchRecent records a note as just opened, for :recent and
+// start_page = "last" in both apps.
+func (s *NotesService) TouchRecent(kind, id string) {
+	if p, err := recent.Path(); err == nil {
+		recent.Touch(p, kind+"/"+id) //nolint:errcheck // a convenience
+	}
+}
+
+// LastNote is the most recently opened note that still exists, as
+// "kind/id", or "".
+func (s *NotesService) LastNote() string {
+	p, err := recent.Path()
+	if err != nil {
+		return ""
+	}
+	st := s.lock()
+	defer s.mu.Unlock()
+	for _, k := range recent.Load(p) {
+		kind, id, _ := strings.Cut(k, "/")
+		if pk, err := notes.ParseKind(kind); err == nil {
+			if _, err := st.Get(pk, id); err == nil {
+				return k
+			}
+		}
+	}
+	return ""
+}
+
+// Templates lists the page templates in the config folder's templates/.
+func (s *NotesService) Templates() []string {
+	return notes.ListTemplates((&commands.Env{}).TemplatesPath())
+}
+
+// CreateFromTemplate creates a page titled title from template name.
+func (s *NotesService) CreateFromTemplate(name, title string, tags []string) (*notes.Note, error) {
+	src, err := notes.ReadTemplate((&commands.Env{}).TemplatesPath(), name)
+	if err != nil {
+		return nil, err
+	}
+	st := s.lock()
+	defer s.mu.Unlock()
+	return st.CreateFromTemplate(title, src, tags)
 }

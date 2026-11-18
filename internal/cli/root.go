@@ -77,6 +77,7 @@ func NewRoot(version string, tui TUIFunc) *cobra.Command {
 		initCmd(app), newCmd(app), lsCmd(app), showCmd(app), editCmd(app),
 		rmCmd(app), todayCmd(app), searchCmd(app), tagsCmd(app), mvCmd(app),
 		configCmd(app), tasksCmd(app), linksCmd(app), backlinksCmd(app),
+		todoCmd(app), syncCmd(app),
 	)
 	return root
 }

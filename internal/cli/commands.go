@@ -36,7 +36,7 @@ func initCmd(a *App) *cobra.Command {
 func newCmd(a *App) *cobra.Command {
 	var tags []string
 	var noEdit bool
-	var body string
+	var body, tmpl string
 	cmd := &cobra.Command{
 		Use:   "new [title]",
 		Short: "Create a page (or a journal entry with -j; title is then an optional YYYY-MM-DD date)",
@@ -55,7 +55,24 @@ func newCmd(a *App) *cobra.Command {
 				}
 				body = string(b)
 			}
-			n, err := a.Store.Create(kind, strings.Join(args, " "), tags, body)
+			var n *notes.Note
+			var err error
+			if tmpl != "" {
+				if kind == notes.KindJournal || body != "" {
+					return fmt.Errorf("--template makes a page and can't be combined with -j or -m")
+				}
+				dir, derr := templatesDir()
+				if derr != nil {
+					return derr
+				}
+				src, terr := notes.ReadTemplate(dir, tmpl)
+				if terr != nil {
+					return terr
+				}
+				n, err = a.Store.CreateFromTemplate(strings.Join(args, " "), src, tags)
+			} else {
+				n, err = a.Store.Create(kind, strings.Join(args, " "), tags, body)
+			}
 			if err != nil {
 				return err
 			}
@@ -75,6 +92,7 @@ func newCmd(a *App) *cobra.Command {
 	cmd.Flags().StringSliceVarP(&tags, "tags", "t", nil, "comma-separated tags")
 	cmd.Flags().BoolVar(&noEdit, "no-edit", false, "don't open the editor")
 	cmd.Flags().StringVarP(&body, "message", "m", "", "note body (use - to read stdin)")
+	cmd.Flags().StringVar(&tmpl, "template", "", "create the page from a template in the config folder's templates/")
 	return cmd
 }
 

@@ -137,9 +137,24 @@ func toTime(v any) (time.Time, bool) {
 	return time.Time{}, false
 }
 
-// encodeNote renders n as a Markdown document with YAML frontmatter. Known
-// keys come first in a fixed order, followed by unknown keys sorted by name.
+// encodeNote renders n as a Markdown document with YAML frontmatter.
 func encodeNote(n *Note) ([]byte, error) {
+	header, err := encodeFrontmatter(n)
+	if err != nil {
+		return nil, err
+	}
+	var buf bytes.Buffer
+	buf.WriteString(fmDelim + "\n")
+	buf.Write(header)
+	buf.WriteString(fmDelim + "\n")
+	buf.WriteString(n.Body)
+	return buf.Bytes(), nil
+}
+
+// encodeFrontmatter renders n's frontmatter as YAML, without the --- lines.
+// Known keys come first in a fixed order, followed by unknown keys sorted by
+// name.
+func encodeFrontmatter(n *Note) ([]byte, error) {
 	doc := &yaml.Node{Kind: yaml.MappingNode}
 	add := func(k string, v any) error {
 		var val yaml.Node
@@ -178,14 +193,11 @@ func encodeNote(n *Note) ([]byte, error) {
 	}
 
 	var buf bytes.Buffer
-	buf.WriteString(fmDelim + "\n")
 	enc := yaml.NewEncoder(&buf)
 	enc.SetIndent(2)
 	if err := enc.Encode(doc); err != nil {
 		return nil, err
 	}
 	enc.Close()
-	buf.WriteString(fmDelim + "\n")
-	buf.WriteString(n.Body)
 	return buf.Bytes(), nil
 }

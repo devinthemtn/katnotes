@@ -7,10 +7,11 @@
   import { SLASH, matchSlash, mergeSlash, slashQuery, slashToken, expandSlash, applyUserResult, caretXY, rank, type SlashCommand } from './slash';
   import { linkQuery, linkSuggestions, linkMarkdown, linkText, applyLink, decorateLinks, type NoteRef, type LinkSuggestion } from './links';
   import EditorMenu from './EditorMenu.svelte';
-  import { Browser } from '@wailsio/runtime';
+  import { Browser, Clipboard } from '@wailsio/runtime';
   import { NotesService as api } from '../bindings/github.com/devinthemtn/katnotes/katnotes-gui';
   import type { Note, Match, TagCount, NoteTasks, Task, Backlink } from '../bindings/github.com/devinthemtn/katnotes/internal/notes';
   import type { Config } from '../bindings/github.com/devinthemtn/katnotes/internal/config';
+  import type { Completion as CmdCompletion, Result as CmdResult, Choice as CmdChoice, Spec as CmdSpec } from '../bindings/github.com/devinthemtn/katnotes/internal/commands';
 
   marked.use({ renderer: { checkbox: checkboxHTML } });
 
@@ -50,6 +51,8 @@
   // modals
   let newOpen = $state(false);
   let newTitle = $state('');
+  let newTemplate = $state(''); // page template name, '' for a blank page
+  let templates: string[] = $state([]);
   let deleteOpen = $state(false);
   let settingsOpen = $state(false);
   let helpOpen = $state(false);
@@ -59,7 +62,21 @@
   let cmdOpen = $state(false);
   let cmdInput = $state('');
   let cmdSel = $state(0);
+  let cmdMoved = $state(false); // selection moved with ↑↓ since the last edit
+  let cmdComp = $state<CmdCompletion | null>(null);
+  let cmdErr = $state('');
+  let cmdHist: string[] = $state([]); // newest first
+  let cmdHistIdx = $state(-1); // browsing history with ↑, or -1
+  let cmdPick = $state<{ title: string; items: CmdChoice[] } | null>(null);
+  let cmdCatalog: CmdSpec[] = $state([]);
   let cmdEl: HTMLInputElement | undefined = $state();
+
+  // ":frontmatter" editor
+  let fmEditOpen = $state(false);
+  let fmEditText = $state('');
+  let fmEditInferred = $state(false);
+  let fmEditErr = $state('');
+  let fmEditEl: HTMLTextAreaElement | undefined = $state();
 
   // editor slash menu
   // frontmatter panel above the editor
@@ -293,6 +310,7 @@
     if (changed) backlinks = [];
     loadBacklinks();
     if (n) savePref('lastNote', keyOf(n));
+    if (n && changed) api.TouchRecent(n.kind, n.id).catch(() => {});
     conflict = false;
     dirty = false;
     saveState = 'saved';
@@ -390,6 +408,8 @@
 
   async function openNew() {
     newTitle = '';
+    newTemplate = '';
+    try { templates = (await api.Templates()) ?? []; } catch { templates = []; }
     newOpen = true;
     await tick();
     newEl?.focus();
@@ -400,7 +420,10 @@
     if (kind === 'page' && !newTitle.trim()) return;
     await flushSave();
     try {
-      const n = await api.Create(kind, newTitle.trim(), tagFilter ? [tagFilter] : []);
+      const tags = tagFilter ? [tagFilter] : [];
+      const n = kind === 'page' && newTemplate
+        ? await api.CreateFromTemplate(newTemplate, newTitle.trim(), tags)
+        : await api.Create(kind, newTitle.trim(), tags);
       newOpen = false;
       if (tab === 'tags' || tab === 'tasks') tab = 'page';
       mainView = 'note';
@@ -517,7 +540,8 @@
       start = c.start_page || 'none';
     } catch { return; }
     if (start === 'today') return openToday();
-    const target = start === 'last' ? loadPref('lastNote', '') : start;
+    // "last" is shared with the TUI (the recent file); older installs fall back to localStorage.
+    const target = start === 'last' ? ((await api.LastNote().catch(() => '')) || loadPref('lastNote', '')) : start;
     const [kind, ...rest] = target.split('/');
     const id = rest.join('/');
     if ((kind !== 'page' && kind !== 'journal') || !id) return;
@@ -629,53 +653,205 @@
     }
   }
 
-  type Command = { name: string; desc: string; keys?: string; run: () => void | Promise<void> };
-  const commands: Command[] = [
-    { name: 'zoom', desc: 'Toggle focus mode (hide sidebar and top bar)', keys: `${modLabel}+Shift+Z`, run: toggleZoom },
-    { name: 'open', desc: 'Open the note in the default editor', keys: `${modLabel}+Shift+O`, run: openExternal },
-    { name: 'terminal', desc: "Open a terminal in the note's folder", run: openTerminal },
-    { name: 'tasks', desc: 'Show all tasks from every note', keys: `${modLabel}+Shift+T`, run: showTasks },
-    { name: 'reload', desc: 'Reload config.toml and Lua / commands', run: reloadConfig },
-  ];
+  // The command catalog, argument parsing and completion live in Go
+  // (internal/commands, shared with the TUI). This side draws the palette,
+  // applies results, and performs the UI-only commands.
+  const cmdKeys: Record<string, string> = {
+    zoom: `${modLabel}+Shift+Z`,
+    external: `${modLabel}+Shift+O`,
+    tasks: `${modLabel}+Shift+T`,
+    journal: `${modLabel}+J`,
+    help: 'F1',
+  };
+  const uiActions: Record<string, (r: CmdResult) => void | Promise<void>> = {
+    zoom: toggleZoom,
+    external: openExternal,
+    terminal: openTerminal,
+    tasks: (r) => {
+      for (const a of (r.args ?? []).map((x) => x.toLowerCase())) {
+        if (a === 'open' || a === 'done' || a === 'all') setTaskFilter(a);
+        else if (a === 'any' || a === 'overdue' || a === 'week') setTaskWhen(a);
+      }
+      return showTasks();
+    },
+    reload: reloadConfig,
+    help: () => { helpOpen = true; },
+    delete: () => { if (current) deleteOpen = true; },
+    frontmatter: openFrontmatter,
+  };
 
-  let cmdMatches = $derived(rank(commands, cmdInput, (c) => c.desc));
+  function usage(c: CmdSpec): string {
+    return [c.name, ...(c.args ?? []).map((a) => {
+      const n = a.name + (a.rest || a.many ? '…' : '');
+      return a.optional ? `[${n}]` : `<${n}>`;
+    })].join(' ');
+  }
 
-  // Ghost completion: the rest of the selected command's name, when it extends what was typed.
-  let cmdGhost = $derived.by(() => {
-    const c = cmdMatches[cmdSel];
+  let cmdItems = $derived(cmdComp?.items ?? []);
+
+  // Pick mode (links, backlinks): the palette lists notes; typing filters them.
+  let cmdPickItems = $derived.by(() => {
+    if (!cmdPick) return [];
     const q = cmdInput.trim().toLowerCase();
-    return c && q && c.name.startsWith(q) ? c.name.slice(q.length) : '';
+    return q ? cmdPick.items.filter((c) => c.title.toLowerCase().includes(q) || c.id.includes(q)) : cmdPick.items;
   });
 
-  async function openPalette() {
-    cmdInput = '';
-    cmdSel = 0;
-    cmdOpen = true;
+  // Ghost completion: the rest of the selected suggestion, when it extends what was typed.
+  let cmdGhost = $derived.by(() => {
+    const c = cmdComp;
+    const s = cmdItems[cmdSel];
+    if (cmdPick || !c || !s || !c.fragment || cmdInput !== c.keep + c.fragment) return '';
+    const v = s.value.trimEnd();
+    return v.length > c.fragment.length && v.slice(0, c.fragment.length).toLowerCase() === c.fragment.toLowerCase()
+      ? v.slice(c.fragment.length) : '';
+  });
+
+  let cmdSeq = 0;
+  async function refreshCompletion() {
+    const seq = ++cmdSeq;
+    const input = cmdInput;
+    try {
+      const c = await api.CompleteCommand(input, current?.kind ?? '', current?.id ?? '');
+      if (seq !== cmdSeq) return;
+      cmdComp = c;
+      cmdSel = 0;
+      cmdMoved = false;
+    } catch (e) {
+      if (seq === cmdSeq) cmdErr = errMsg(e);
+    }
+  }
+
+  async function setCmdInput(v: string) {
+    cmdInput = v;
+    cmdErr = '';
+    await refreshCompletion();
     await tick();
+    cmdEl?.setSelectionRange(v.length, v.length);
+  }
+
+  function onCmdInput() {
+    cmdHistIdx = -1;
+    cmdErr = '';
+    if (cmdPick) { cmdSel = 0; return; }
+    refreshCompletion();
+  }
+
+  async function openPalette() {
+    cmdPick = null;
+    cmdErr = '';
+    cmdHistIdx = -1;
+    cmdOpen = true;
+    try { cmdHist = (await api.CommandHistory()) ?? []; } catch { cmdHist = []; }
+    await setCmdInput('');
     cmdEl?.focus();
   }
 
   async function closePalette() {
     cmdOpen = false;
+    cmdPick = null;
     await tick();
     bodyEl?.focus();
   }
 
+  function accept(i: number) {
+    const s = cmdItems[i];
+    if (s && cmdComp) setCmdInput(cmdComp.keep + s.value);
+  }
+
   async function runCommand() {
-    const q = cmdInput.trim().toLowerCase();
-    const c = commands.find((x) => x.name === q) ?? cmdMatches[cmdSel];
-    if (!c) {
-      cmdOpen = false;
-      if (q) flash(`unknown command: ${q}`, true);
+    if (cmdPick) {
+      const c = cmdPickItems[cmdSel];
+      if (c) { await closePalette(); await openChoice(c); }
+      return;
+    }
+    let line = cmdInput;
+    const c = cmdComp;
+    if (c && cmdItems.length && (cmdMoved || (c.phase === 'command' && !c.exact))) line = c.keep + cmdItems[cmdSel].value;
+    line = line.trim();
+    if (!line) { await closePalette(); return; }
+    if (dirty && conflict) { cmdErr = 'this note has a save conflict: reload or save it first'; return; }
+    await flushSave();
+    const spec = cmdCatalog.find((c) => line.toLowerCase() === c.name || line.toLowerCase().startsWith(c.name + ' '));
+    if (spec?.long) { await closePalette(); flash(`${spec.name}…`); }
+    let r: CmdResult;
+    try {
+      r = await api.RunCommand(line, current?.kind ?? '', current?.id ?? '');
+    } catch (e) {
+      if (spec?.long) { flash(errMsg(e), true); return; }
+      // Keep the palette open with the line, so it can be fixed.
+      cmdInput = line;
+      cmdErr = errMsg(e);
+      return;
+    }
+    if (spec?.long && r.pickTitle) cmdOpen = true;
+    await applyResult(r);
+  }
+
+  async function applyResult(r: CmdResult) {
+    if (r.pickTitle) {
+      if (r.pick?.length) {
+        cmdPick = { title: r.pickTitle, items: r.pick };
+        cmdInput = '';
+        cmdSel = 0;
+        cmdErr = '';
+        return;
+      }
+      await closePalette();
+      flash(r.status);
       return;
     }
     await closePalette();
-    await c.run();
+    if (r.clipboard) {
+      try { await Clipboard.SetText(r.clipboard); } catch { await navigator.clipboard?.writeText(r.clipboard); }
+    }
+    const act = r.ui ? uiActions[r.ui] : undefined;
+    if (act) { await act(r); return; }
+    if (r.note) {
+      const want: Tab = r.note.kind === 'journal' ? 'journal' : 'page';
+      if (tab !== want) tab = want;
+      mainView = 'note';
+      await refreshList();
+      if (!items.some((n) => keyOf(n) === keyOf(r.note!)) && (tagFilter || query)) {
+        tagFilter = '';
+        query = '';
+        await refreshList();
+      }
+      setCurrent(r.note);
+      if (r.edit) { await tick(); bodyEl?.focus(); }
+    } else if (r.changed) {
+      await refreshList();
+      await reloadCurrent();
+    }
+    if (r.changed) loadLinkTargets();
+    if (r.status) flash(r.status);
+  }
+
+  async function openChoice(c: CmdChoice) {
+    try {
+      if (!c.exists) await api.EnsureNote(c.kind, c.id, c.title);
+      const want: Tab = c.kind === 'journal' ? 'journal' : 'page';
+      if (tab !== want) { tab = want; await refreshList(); }
+      await open(c.kind, c.id);
+      if (!c.exists) { await refreshList(); loadLinkTargets(); flash(`created ${c.kind}/${c.id}`); }
+    } catch (e) {
+      flash(errMsg(e), true);
+    }
   }
 
   function moveSel(d: number) {
-    const n = cmdMatches.length;
-    if (n) cmdSel = (cmdSel + d + n) % n;
+    const n = cmdPick ? cmdPickItems.length : cmdItems.length;
+    if (n) { cmdSel = (cmdSel + d + n) % n; cmdMoved = true; }
+  }
+
+  function histStep(d: number): boolean {
+    if (cmdPick) return false;
+    const next = cmdHistIdx + d;
+    if (d > 0 && !(cmdInput === '' || cmdHistIdx >= 0)) return false;
+    if (d < 0 && cmdHistIdx < 0) return false;
+    if (next >= cmdHist.length) return true;
+    cmdHistIdx = next;
+    setCmdInput(next < 0 ? '' : cmdHist[next]);
+    return true;
   }
 
   function onCmdKey(e: KeyboardEvent) {
@@ -686,22 +862,70 @@
       e.preventDefault(); runCommand();
     } else if (e.key === 'Tab') {
       e.preventDefault();
-      const c = cmdMatches[cmdSel];
-      if (c && cmdInput.trim().toLowerCase() !== c.name) {
-        cmdInput = c.name;
-      } else {
+      if (cmdPick) { moveSel(e.shiftKey ? -1 : 1); return; }
+      const s = cmdItems[cmdSel];
+      if (!s || !cmdComp) return;
+      cmdHistIdx = -1;
+      if (cmdComp.fragment === s.value) {
         // Already complete: cycle to the next/previous match.
         moveSel(e.shiftKey ? -1 : 1);
-        if (cmdMatches[cmdSel]) cmdInput = cmdMatches[cmdSel].name;
+        cmdInput = cmdComp.keep + cmdItems[cmdSel].value;
+      } else {
+        accept(cmdSel);
       }
     } else if (e.key === 'ArrowDown' || (mod && e.key.toLowerCase() === 'n')) {
-      e.preventDefault(); e.stopPropagation(); moveSel(1);
+      e.preventDefault(); e.stopPropagation();
+      if (!histStep(-1)) moveSel(1);
     } else if (e.key === 'ArrowUp' || (mod && e.key.toLowerCase() === 'p')) {
-      e.preventDefault(); e.stopPropagation(); moveSel(-1);
+      e.preventDefault(); e.stopPropagation();
+      if (!histStep(1)) moveSel(-1);
     } else if (mod) {
       // Keep global shortcuts (Ctrl+S, Ctrl+K, …) from firing under the palette.
       e.stopPropagation();
     }
+  }
+
+  // ---- frontmatter editor (":frontmatter") ----
+  async function openFrontmatter() {
+    if (!current) { flash('no note open', true); return; }
+    await flushSave();
+    try {
+      const d = await api.FrontmatterText(current.kind, current.id);
+      fmEditText = d.yaml;
+      fmEditInferred = d.inferred;
+      fmEditErr = '';
+      fmEditOpen = true;
+      await tick();
+      fmEditEl?.focus();
+    } catch (e) {
+      flash(errMsg(e), true);
+    }
+  }
+
+  async function saveFrontmatter() {
+    if (!current) return;
+    try {
+      const r = await api.ApplyFrontmatter(current.kind, current.id, fmEditText);
+      fmEditOpen = false;
+      if (r?.note) {
+        const renamed = keyOf(r.note) !== keyOf(current);
+        setCurrent(r.note);
+        const n = r.updated?.length ?? 0;
+        flash(renamed ? `frontmatter saved; renamed to ${keyOf(r.note)}${n ? ` · updated links in ${n} note(s)` : ''}` : 'frontmatter saved');
+      }
+      await refreshList();
+      loadLinkTargets();
+      await tick();
+      bodyEl?.focus();
+    } catch (e) {
+      fmEditErr = errMsg(e);
+    }
+  }
+
+  function onFmEditKey(e: KeyboardEvent) {
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); fmEditOpen = false; bodyEl?.focus(); }
+    else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); e.stopPropagation(); saveFrontmatter(); }
+    else if (e.ctrlKey || e.metaKey) e.stopPropagation();
   }
 
   // ---- tasks across notes ----
@@ -869,8 +1093,8 @@
   function onKey(e: KeyboardEvent) {
     const mod = e.ctrlKey || e.metaKey;
     if (e.key === 'Escape') {
-      if (newOpen || deleteOpen || settingsOpen || helpOpen || cmdOpen) {
-        newOpen = deleteOpen = settingsOpen = helpOpen = cmdOpen = false;
+      if (newOpen || deleteOpen || settingsOpen || helpOpen || cmdOpen || fmEditOpen) {
+        newOpen = deleteOpen = settingsOpen = helpOpen = cmdOpen = fmEditOpen = false;
         e.preventDefault();
       } else if (mainView === 'tasks') {
         mainView = 'note';
@@ -1204,9 +1428,11 @@
     }
   }
 
-  function fmtDate(s: string): string {
+  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  // "Nov 03 2026", the TUI's format.
+  function fmtDay(s: string): string {
     const d = new Date(s);
-    return isNaN(d.getTime()) ? '' : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+    return isNaN(d.getTime()) ? '' : `${MONTHS[d.getMonth()]} ${String(d.getDate()).padStart(2, '0')} ${d.getFullYear()}`;
   }
 
   onMount(() => {
@@ -1215,6 +1441,7 @@
     loadUserSlash();
     loadMetaStats();
     loadLinkTargets();
+    api.Commands().then((c) => { cmdCatalog = (c ?? []).filter((x): x is CmdSpec => !!x); }).catch(() => {});
     window.addEventListener('focus', onFocus);
     // Ctrl+Shift+Z is bound in main.go (Wails swallows it on Linux).
     window.addEventListener('katnotes:toggle-zoom', toggleZoom);
@@ -1311,15 +1538,16 @@
               class:active={current && keyOf(current) === keyOf(n)}
               onclick={() => open(n.kind, n.id)}
             >
-              <span class="title">{n.title}</span>
-              <span class="meta">
-                {n.kind === 'journal' ? n.id : fmtDate(n.updated)}
-                {#each n.tags ?? [] as t}<span class="tag">#{t}</span>{/each}
-              </span>
+              <!-- Same rows as the TUI list: dates line, then tags; a search adds the hit. -->
+              <span class="title">{#if n.extra?.pinned === true}<span class="pin" title="pinned">📌</span>{/if}{n.title}</span>
+              {#if n.kind === 'journal'}
+                <span class="meta">{n.id}{#each n.tags ?? [] as t}<span class="tag">#{t}</span>{/each}</span>
+              {:else}
+                <span class="meta dates">{fmtDay(n.created)} <span class="sep">│</span> m: {fmtDay(n.updated)}</span>
+                {#if n.tags?.length}<span class="meta">{#each n.tags as t}<span class="tag">#{t}</span>{/each}</span>{/if}
+              {/if}
               {#if m && m.lines && m.lines.length}
-                <span class="snippet">…{m.lines[0].text}</span>
-              {:else if n.snippet}
-                <span class="snippet">{n.snippet}</span>
+                <span class="snippet">…{m.lines[0].text.trim()}</span>
               {/if}
             </button>
           </li>
@@ -1541,6 +1769,14 @@
         bind:value={newTitle}
         placeholder={tab === 'journal' ? 'YYYY-MM-DD (empty for today)' : 'Title'}
       />
+      {#if tab !== 'journal' && templates.length}
+        <label class="tmpl-pick">Template
+          <select bind:value={newTemplate}>
+            <option value="">Blank page</option>
+            {#each templates as t (t)}<option value={t}>{t}</option>{/each}
+          </select>
+        </label>
+      {/if}
       {#if tagFilter}<p class="hint">Will be tagged #{tagFilter}</p>{/if}
       <div class="modal-actions">
         <button type="button" onclick={() => (newOpen = false)}>Cancel</button>
@@ -1566,35 +1802,83 @@
 {#if cmdOpen}
   <div class="backdrop palette-backdrop" role="presentation" onclick={closePalette}>
     <div class="modal palette" role="dialog" aria-label="Command palette" tabindex="-1" onclick={(e) => e.stopPropagation()} onkeydown={() => {}}>
+      {#if cmdPick}<div class="cmd-pick-title">{cmdPick.title}</div>{/if}
       <div class="cmd-line">
-        <span class="cmd-prompt">:</span>
+        <span class="cmd-prompt">{cmdPick ? '›' : ':'}</span>
         <div class="cmd-field">
           <span class="cmd-ghost" aria-hidden="true"><span class="cmd-typed">{cmdInput}</span>{cmdGhost}</span>
           <input
             bind:this={cmdEl}
             bind:value={cmdInput}
-            oninput={() => (cmdSel = 0)}
+            oninput={onCmdInput}
             onkeydown={onCmdKey}
             spellcheck="false"
             autocomplete="off"
-            aria-label="Command"
+            aria-label={cmdPick ? 'Filter notes' : 'Command'}
+            placeholder={cmdPick ? 'filter…' : ''}
           />
         </div>
       </div>
+      {#if !cmdPick && cmdComp && (cmdComp.phase !== 'command' || cmdComp.exact)}
+        <div class="cmd-usage"><code>{cmdComp.usage}</code> {cmdComp.desc}</div>
+      {/if}
+      {#if cmdErr}<div class="cmd-err">{cmdErr}</div>{/if}
       <ul class="cmd-list">
-        {#each cmdMatches as c, i (c.name)}
-          <li>
-            <button class="cmd-item" class:active={i === cmdSel} onmouseenter={() => (cmdSel = i)} onclick={() => { cmdSel = i; cmdInput = c.name; runCommand(); }}>
-              <span class="cmd-name">{c.name}</span>
-              <span class="cmd-desc">{c.desc}</span>
-              {#if c.keys}<kbd>{c.keys}</kbd>{/if}
-            </button>
-          </li>
+        {#if cmdPick}
+          {#each cmdPickItems as c, i (c.kind + '/' + c.id)}
+            <li>
+              <button class="cmd-item" class:active={i === cmdSel} class:muted={!c.exists} onmouseenter={() => (cmdSel = i)} onclick={() => { cmdSel = i; runCommand(); }}>
+                <span class="cmd-name">{c.title}</span>
+                <span class="cmd-desc">{c.detail}</span>
+              </button>
+            </li>
+          {:else}
+            <li class="empty">No matching note.</li>
+          {/each}
         {:else}
-          <li class="empty">No matching command.</li>
-        {/each}
+          {#each cmdItems as c, i (c.value + (c.recent ? ' r' : ''))}
+            <li>
+              <button class="cmd-item" class:active={i === cmdSel} onmouseenter={() => (cmdSel = i)} onclick={() => {
+                if (cmdComp?.phase === 'command' && !c.value.endsWith(' ')) { cmdSel = i; cmdMoved = true; runCommand(); }
+                else { accept(i); cmdEl?.focus(); }
+              }}>
+                <span class="cmd-name">{#if c.recent}<span class="cmd-recent" title="recent">↺</span>{/if}{c.label}</span>
+                <span class="cmd-desc">{c.detail}</span>
+                {#if cmdComp?.phase === 'command' && !c.recent && cmdKeys[c.value.trim()]}<kbd>{cmdKeys[c.value.trim()]}</kbd>{/if}
+              </button>
+            </li>
+          {:else}
+            <li class="empty">
+              {#if cmdComp?.phase === 'arg'}&lt;{cmdComp.arg}&gt;: type a value, Enter runs it
+              {:else if cmdComp?.phase === 'none'}Enter runs it
+              {:else}No matching command.{/if}
+            </li>
+          {/each}
+        {/if}
       </ul>
-      <div class="cmd-foot hint">Tab complete · ↑↓ select · Enter run · Esc close</div>
+      <div class="cmd-foot hint">
+        {#if cmdPick}↑↓ select · Enter open · Esc close
+        {:else if cmdHist.length && !cmdInput}↑ history · Tab complete · Enter run · Esc close
+        {:else}Tab complete · ↑↓ select · Enter run · Esc close{/if}
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if fmEditOpen && current}
+  <div class="backdrop" role="presentation" onclick={() => (fmEditOpen = false)}>
+    <div class="modal fm-edit" role="dialog" aria-label="Edit frontmatter" tabindex="-1" onclick={(e) => e.stopPropagation()} onkeydown={onFmEditKey}>
+      <h2>Frontmatter · {current.title}</h2>
+      {#if fmEditInferred}
+        <p class="hint">This note has no frontmatter yet. These values were worked out from the file (first heading, file dates); saving adds them to it.</p>
+      {/if}
+      <textarea bind:this={fmEditEl} bind:value={fmEditText} spellcheck="false" rows="12"></textarea>
+      <p class="hint">YAML. <code>tags: [a, b]</code> · <code>created: 2026-01-31</code> · <code>updated</code> is set when you save · a new title renames the note.</p>
+      {#if fmEditErr}<div class="cmd-err">{fmEditErr}</div>{/if}
+      <div class="modal-actions">
+        <button onclick={() => (fmEditOpen = false)}>Cancel</button>
+        <button class="primary" onclick={saveFrontmatter} title="{modLabel}+Enter">Save</button>
+      </div>
     </div>
   </div>
 {/if}
@@ -1621,9 +1905,9 @@
         {/each}
         <h3>Command palette</h3>
         <dl>
-          {#each commands as c}
-            <dt><kbd>:{c.name}</kbd></dt>
-            <dd>{c.desc}</dd>
+          {#each cmdCatalog as c (c.name)}
+            <dt><kbd>:{usage(c)}</kbd></dt>
+            <dd>{c.desc}{#if cmdKeys[c.name]} <span class="hint">({cmdKeys[c.name]})</span>{/if}</dd>
           {/each}
         </dl>
       </div>

@@ -72,6 +72,15 @@ type Note struct {
 	Snippet string         `json:"snippet,omitempty"`
 }
 
+// PinnedKey is the frontmatter field that pins a note to the top of lists.
+const PinnedKey = "pinned"
+
+// Pinned reports whether the note has pinned: true in its frontmatter.
+func (n *Note) Pinned() bool {
+	v, ok := n.Extra[PinnedKey].(bool)
+	return ok && v
+}
+
 // HasTag reports whether the note carries tag (case-insensitive).
 func (n *Note) HasTag(tag string) bool {
 	tag = strings.ToLower(strings.TrimPrefix(tag, "#"))
@@ -278,6 +287,9 @@ func sortNotes(ns []Note, kind Kind, by SortBy) {
 	}
 	sort.SliceStable(ns, func(i, j int) bool {
 		a, b := ns[i], ns[j]
+		if pa, pb := a.Pinned(), b.Pinned(); pa != pb {
+			return pa // pinned notes first, whatever the order
+		}
 		switch by {
 		case SortTitle:
 			return strings.ToLower(a.Title) < strings.ToLower(b.Title)

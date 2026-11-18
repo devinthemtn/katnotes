@@ -1,0 +1,335 @@
+package commands
+
+import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"reflect"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/devinthemtn/katnotes/internal/config"
+	"github.com/devinthemtn/katnotes/internal/notes"
+	"github.com/devinthemtn/katnotes/internal/recent"
+)
+
+var fixed = time.Date(2026, 11, 17, 9, 0, 0, 0, time.Local)
+
+func newEnv(t *testing.T) *Env {
+	t.Helper()
+	t.Setenv(config.EnvConfigDir, t.TempDir()) // history, recent, templates
+	st := notes.New(t.TempDir())
+	st.Now = func() time.Time { return fixed }
+	if err := st.Init(); err != nil {
+		t.Fatal(err)
+	}
+	return &Env{Store: st, App: AppTUI, Now: func() time.Time { return fixed }}
+}
+
+func mustCreate(t *testing.T, env *Env, title string, tags ...string) *notes.Note {
+	t.Helper()
+	n, err := env.Store.Create(notes.KindPage, title, tags, "# "+title+"\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+func values(c Completion) []string {
+	out := []string{}
+	for _, s := range c.Items {
+		out = append(out, s.Value)
+	}
+	return out
+}
+
+func TestParse(t *testing.T) {
+	cases := []struct {
+		in   string
+		name string
+		args []string
+	}{
+		{"tag add work ideas", "tag add", []string{"work", "ideas"}},
+		{"TAG RM  x", "tag rm", []string{"x"}},
+		{"open My Big Page", "open", []string{"My Big Page"}},
+		{`open "Quoted Page"`, "open", []string{"Quoted Page"}},
+		{`set status "in progress"`, "set", []string{"status", "in progress"}},
+		{"set status draft", "set", []string{"status", "draft"}},
+		{"journal", "journal", nil},
+		{"journal yesterday", "journal", []string{"yesterday"}},
+	}
+	for _, c := range cases {
+		p, err := Parse(AppTUI, c.in)
+		if err != nil {
+			t.Errorf("Parse(%q): %v", c.in, err)
+			continue
+		}
+		if p.Spec.Name != c.name || !reflect.DeepEqual(p.Args, c.args) {
+			t.Errorf("Parse(%q) = %s %q, want %s %q", c.in, p.Spec.Name, p.Args, c.name, c.args)
+		}
+	}
+	for _, bad := range []string{"", "nope", "tag", "open", "copy-link extra", "zoom"} {
+		if _, err := Parse(AppTUI, bad); err == nil {
+			t.Errorf("Parse(%q) succeeded", bad)
+		}
+	}
+	if _, err := Parse(AppGUI, "zoom"); err != nil {
+		t.Errorf("zoom in the GUI: %v", err)
+	}
+}
+
+func TestCompleteCommands(t *testing.T) {
+	env := newEnv(t)
+	c := Complete(env, "ta")
+	if c.Phase != "command" || len(c.Items) < 3 || c.Items[0].Value != "tag add " {
+		t.Fatalf("ta -> %+v", values(c))
+	}
+	if c := Complete(env, "tag "); c.Phase != "command" || !reflect.DeepEqual(values(c)[:2], []string{"tag add ", "tag rm "}) {
+		t.Fatalf("'tag ' -> %v", values(c))
+	}
+	if c := Complete(env, "contains"); len(c.Items) != 1 || c.Items[0].Value != "sync-tasks" {
+		t.Fatalf("description match -> %v", values(c))
+	}
+	if c := Complete(env, "open"); !c.Exact || c.Usage != "open <note…>" {
+		t.Fatalf("exact -> %+v", c)
+	}
+	env.History = []string{"tag add work", "open Groceries"}
+	if c := Complete(env, ""); !c.Items[0].Recent || c.Items[0].Value != "tag add work" {
+		t.Fatalf("empty prompt should lead with history: %v", values(c))
+	}
+}
+
+func TestCompleteArgs(t *testing.T) {
+	env := newEnv(t)
+	mustCreate(t, env, "Groceries", "home", "errands")
+	mustCreate(t, env, "Work Log", "work")
+	env.Note = mustCreate(t, env, "Current", "home")
+	env.Store.SetField(env.Note, "status", "draft")
+	env.Note, _ = env.Store.Get(notes.KindPage, "current")
+
+	c := Complete(env, "tag add ")
+	if got := values(c); !reflect.DeepEqual(got, []string{"errands ", "work "}) {
+		t.Errorf("tag add: %v (home is already on the note)", got)
+	}
+	if got := values(Complete(env, "tag add errands w")); !reflect.DeepEqual(got, []string{"work "}) {
+		t.Errorf("second tag: %v", got)
+	}
+	if c := Complete(env, "tag add w"); c.Keep != "tag add " || c.Fragment != "w" {
+		t.Errorf("keep/fragment = %q/%q", c.Keep, c.Fragment)
+	}
+	if got := values(Complete(env, "tag rm ")); !reflect.DeepEqual(got, []string{"home "}) {
+		t.Errorf("tag rm: %v", got)
+	}
+	c = Complete(env, "open work l")
+	if got := values(c); !reflect.DeepEqual(got, []string{"Work Log"}) || c.Keep != "open " {
+		t.Errorf("open: %v keep=%q", got, c.Keep)
+	}
+	if got := values(Complete(env, "set st")); !reflect.DeepEqual(got, []string{"status "}) {
+		t.Errorf("set field: %v", got)
+	}
+	if got := values(Complete(env, "set status ")); !reflect.DeepEqual(got, []string{"draft"}) {
+		t.Errorf("set value: %v", got)
+	}
+	if got := values(Complete(env, "unset ")); !reflect.DeepEqual(got, []string{"tags ", "status "}) {
+		t.Errorf("unset: %v", got)
+	}
+	if got := values(Complete(env, "journal y")); len(got) == 0 || got[0] != "yesterday " {
+		t.Errorf("journal: %v", got)
+	}
+	if c := Complete(env, "copy-link "); c.Phase != "none" || len(c.Items) != 0 {
+		t.Errorf("no-arg command: %+v", c)
+	}
+}
+
+func TestRunNoteActions(t *testing.T) {
+	env := newEnv(t)
+	env.Note = mustCreate(t, env, "Target", "a")
+	linker, _ := env.Store.Create(notes.KindPage, "Linker", nil, notes.LinkMarkdown(notes.KindPage, "target", "Target")+"\n")
+
+	run := func(in string) Result {
+		t.Helper()
+		r, err := Run(env, in)
+		if err != nil {
+			t.Fatalf("%s: %v", in, err)
+		}
+		if r.Note != nil {
+			env.Note = r.Note
+		}
+		return r
+	}
+	run("tag add B c")
+	run("tag rm a")
+	if got := env.Note.Tags; !reflect.DeepEqual(got, []string{"b", "c"}) {
+		t.Fatalf("tags = %v", got)
+	}
+	if _, err := Run(env, "tag rm zzz"); err == nil {
+		t.Error("removing a missing tag succeeded")
+	}
+	run("set status in progress")
+	run("set rating 3")
+	if env.Note.Extra["status"] != "in progress" || env.Note.Extra["rating"] != 3 {
+		t.Fatalf("extra = %v", env.Note.Extra)
+	}
+	run("unset rating")
+	if _, ok := env.Note.Extra["rating"]; ok {
+		t.Fatal("rating still set")
+	}
+	if _, err := Run(env, "set updated 2020-01-01"); err == nil {
+		t.Error("setting updated succeeded")
+	}
+
+	r := run("rename Renamed Target")
+	if env.Note.ID != "renamed-target" || len(r.Relinked) != 1 {
+		t.Fatalf("rename: id=%s relinked=%v", env.Note.ID, r.Relinked)
+	}
+	body, _ := os.ReadFile(linker.Path)
+	if !strings.Contains(string(body), "renamed-target.md") {
+		t.Fatalf("link not rewritten: %s", body)
+	}
+	if r := run("backlinks"); len(r.Pick) != 1 || r.Pick[0].ID != "linker" || r.UI != "backlinks" {
+		t.Fatalf("backlinks: %+v", r)
+	}
+	if r := run("copy-link"); r.Clipboard != "[Renamed Target](../pages/renamed-target.md)" {
+		t.Fatalf("copy-link: %q", r.Clipboard)
+	}
+	if r := run("delete"); r.UI != "delete" || r.Changed {
+		t.Fatalf("delete should be handed to the UI: %+v", r)
+	}
+	env.Note = nil
+	if _, err := Run(env, "tag add x"); err == nil || !strings.Contains(err.Error(), "needs a note") {
+		t.Errorf("no note: %v", err)
+	}
+}
+
+func TestRunNavigation(t *testing.T) {
+	env := newEnv(t)
+	mustCreate(t, env, "Groceries")
+	mustCreate(t, env, "Grocery Budget")
+
+	r, err := Run(env, "open groceries")
+	if err != nil || r.Note.ID != "groceries" {
+		t.Fatalf("exact title: %v %v", r.Note, err)
+	}
+	if _, err := Run(env, "open groc"); err == nil || !strings.Contains(err.Error(), "matches 2") {
+		t.Errorf("ambiguous prefix: %v", err)
+	}
+	if r, err := Run(env, "open budget"); err != nil || r.Note.ID != "grocery-budget" {
+		t.Errorf("unique substring: %v %v", r.Note, err)
+	}
+	r, err = Run(env, "new Fresh Idea")
+	if err != nil || r.Note.ID != "fresh-idea" || !r.Edit || !r.Changed {
+		t.Fatalf("new: %+v %v", r, err)
+	}
+	r, err = Run(env, "journal yesterday")
+	if err != nil || r.Note.ID != "2026-11-16" || !r.Edit {
+		t.Fatalf("journal yesterday: %+v %v", r, err)
+	}
+	if r, err = Run(env, "journal -1"); err != nil || r.Note.ID != "2026-11-16" || r.Edit {
+		t.Fatalf("existing journal: %+v %v", r, err)
+	}
+	if _, err := Run(env, "journal someday"); err == nil {
+		t.Error("bad day accepted")
+	}
+}
+
+func TestHistory(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "h")
+	if h := LoadHistory(path); len(h) != 0 {
+		t.Fatalf("missing file: %v", h)
+	}
+	AddHistory(path, "open a")
+	AddHistory(path, "tag  add   x")
+	h, err := AddHistory(path, "open a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(h, []string{"open a", "tag add x"}) || !reflect.DeepEqual(LoadHistory(path), h) {
+		t.Fatalf("history = %v / %v", h, LoadHistory(path))
+	}
+	for i := 0; i < HistoryLimit+10; i++ {
+		h, _ = AddHistory(path, "open "+strings.Repeat("x", i+1))
+	}
+	if len(h) != HistoryLimit || len(LoadHistory(path)) != HistoryLimit {
+		t.Fatalf("not capped: %d", len(h))
+	}
+}
+
+func TestRunFeatures(t *testing.T) {
+	env := newEnv(t)
+	env.Note = mustCreate(t, env, "Here")
+
+	r, err := Run(env, "todo call Sam {due:tomorrow}")
+	if err != nil || r.Note != nil || !r.Changed {
+		t.Fatalf("todo: %+v %v", r, err)
+	}
+	j, err := env.Store.Get(notes.KindJournal, "2026-11-17")
+	if err != nil || !strings.Contains(j.Body, "- [ ] call Sam {due:2026-11-18}") {
+		t.Fatalf("journal body: %v %q", err, j.Body)
+	}
+	if r, err = Run(env, "todo here write it"); err != nil || !strings.Contains(r.Note.Body, "- [ ] write it") {
+		t.Fatalf("todo here: %+v %v", r, err)
+	}
+
+	r, _ = Run(env, "pin")
+	env.Note = r.Note
+	if !env.Note.Pinned() {
+		t.Fatal("not pinned")
+	}
+	if r, _ = Run(env, "pin"); !strings.Contains(r.Status, "already") {
+		t.Errorf("second pin: %q", r.Status)
+	}
+	if r, _ = Run(env, "unpin"); r.Note.Pinned() {
+		t.Error("still pinned")
+	}
+
+	tdir := env.TemplatesPath()
+	notes.WriteExampleTemplate(tdir)
+	if got := values(Complete(env, "new from ")); !reflect.DeepEqual(got, []string{"meeting "}) {
+		t.Fatalf("template completion: %v", got)
+	}
+	r, err = Run(env, "new from meeting Weekly Sync")
+	if err != nil || r.Note.ID != "weekly-sync" || !r.Note.HasTag("meeting") || !r.Edit {
+		t.Fatalf("new from: %+v %v", r, err)
+	}
+
+	rp, _ := recent.Path()
+	recent.Touch(rp, "page/gone")
+	recent.Touch(rp, "page/here")
+	if r, _ = Run(env, "recent"); len(r.Pick) != 1 || r.Pick[0].ID != "here" || r.PickTitle == "" {
+		t.Fatalf("recent: %+v", r)
+	}
+	if _, err := Run(env, "rename Over Here"); err != nil {
+		t.Fatal(err)
+	}
+	if got := recent.Load(rp); got[0] != "page/over-here" {
+		t.Fatalf("recent after rename: %v", got)
+	}
+
+	if _, err := Run(env, "tasks overdue done"); err != nil {
+		t.Errorf("tasks filters: %v", err)
+	}
+	if _, err := Run(env, "tasks later"); err == nil {
+		t.Error("bad tasks filter accepted")
+	}
+	if _, err := Run(env, "sync"); err == nil || !strings.Contains(err.Error(), "not a git repository") {
+		t.Errorf("sync outside a repo: %v", err)
+	}
+}
+
+func TestGitStatusPick(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	env := newEnv(t)
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	if out, err := exec.Command("git", "-C", env.Store.Root, "init", "-q").CombinedOutput(); err != nil {
+		t.Fatalf("%v %s", err, out)
+	}
+	mustCreate(t, env, "Changed")
+	os.WriteFile(filepath.Join(env.Store.Root, "loose.txt"), []byte("x"), 0o644)
+	r, err := Run(env, "git status")
+	if err != nil || len(r.Pick) != 1 || r.Pick[0].ID != "changed" || !strings.Contains(r.Status, "new loose.txt") {
+		t.Fatalf("git status: %+v %v", r, err)
+	}
+}

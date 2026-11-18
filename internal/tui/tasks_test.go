@@ -46,10 +46,22 @@ func TestTasksTab(t *testing.T) {
 	if len(m.list.Items()) != 1 { // eggs is done and hidden
 		t.Fatalf("open tasks = %d", len(m.list.Items()))
 	}
-	press("a")
+	press("a") // open → done
+	if it, ok := m.list.SelectedItem().(taskItem); len(m.list.Items()) != 1 || !ok || it.t.Text != "eggs" {
+		t.Fatalf("done tasks = %d", len(m.list.Items()))
+	}
+	press("a") // done → all
 	if len(m.list.Items()) != 2 {
 		t.Fatalf("all tasks = %d", len(m.list.Items()))
 	}
+	press("w") // any → overdue: neither task has a due date
+	if len(m.list.Items()) != 0 || !strings.Contains(m.View(), "all · overdue") {
+		t.Fatalf("overdue tasks = %d", len(m.list.Items()))
+	}
+	press("w")
+	press("w") // back to any date
+	press("k")
+	press("k")
 	if v := m.View(); v == "" {
 		t.Error("empty view")
 	}

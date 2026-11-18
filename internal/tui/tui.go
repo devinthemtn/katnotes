@@ -18,8 +18,10 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/devinthemtn/katnotes/internal/cli"
+	"github.com/devinthemtn/katnotes/internal/commands"
 	"github.com/devinthemtn/katnotes/internal/editor"
 	"github.com/devinthemtn/katnotes/internal/notes"
+	"github.com/devinthemtn/katnotes/internal/recent"
 )
 
 // Run starts the TUI.
@@ -27,6 +29,10 @@ func Run(app *cli.App) error {
 	style := "light"
 	if lipgloss.HasDarkBackground() {
 		style = "dark"
+	}
+	env := commands.Env{}
+	if dir := env.TemplatesPath(); dir != "" {
+		notes.WriteExampleTemplate(dir) //nolint:errcheck // the example is a convenience
 	}
 	m := newModel(app, style)
 	_, err := tea.NewProgram(m, tea.WithAltScreen()).Run()
@@ -66,24 +72,46 @@ const (
 
 // list items
 
-type noteItem struct{ n notes.Note }
+// noteItem is a note in the list. match is the search hit shown under it.
+type noteItem struct {
+	n     notes.Note
+	match string
+}
 
-func (i noteItem) Title() string { return i.n.Title }
+func (i noteItem) Title() string {
+	if i.n.Pinned() {
+		return "📌 " + i.n.Title
+	}
+	return i.n.Title
+}
+
+// Description is the lines under the title (the GUI sidebar shows the same):
+// pages get "created │ m: modified" then tags; journal entries their date and
+// tags on one line. A search hit adds its matching line.
 func (i noteItem) Description() string {
+	var lines []string
 	if i.n.Kind == notes.KindPage {
-		// Dates on one line, tags on the next (see pageItemHeight).
 		const day = "Jan 02 2006"
-		lines := []string{i.n.Created.Format(day) + "  │  m: " + i.n.Updated.Format(day)}
+		lines = append(lines, i.n.Created.Format(day)+"  │  m: "+i.n.Updated.Format(day))
+		lines = append(lines, tagsText(i.n.Tags))
+	} else {
+		line := i.n.ID
 		if len(i.n.Tags) > 0 {
-			lines = append(lines, "#"+strings.Join(i.n.Tags, " #"))
+			line += " · " + tagsText(i.n.Tags)
 		}
-		return strings.Join(lines, "\n")
+		lines = append(lines, line)
 	}
-	parts := []string{i.n.ID}
-	if len(i.n.Tags) > 0 {
-		parts = append(parts, "#"+strings.Join(i.n.Tags, " #"))
+	if i.match != "" {
+		lines = append(lines, "…"+i.match)
 	}
-	return strings.Join(parts, " · ")
+	return strings.Join(lines, "\n")
+}
+
+func tagsText(tags []string) string {
+	if len(tags) == 0 {
+		return ""
+	}
+	return "#" + strings.Join(tags, " #")
 }
 func (i noteItem) FilterValue() string { return i.n.Title }
 
@@ -283,16 +311,26 @@ type model struct {
 	confirm *notes.Note
 	help    viewport.Model
 
-	cmdInput textinput.Model // the ":" command window
-	cmdSel   int
+	cmdInput    textinput.Model     // the ":" command window
+	cmdSel      int                 // selected suggestion
+	cmdMoved    bool                // the selection was moved with ↑↓ since the last edit
+	cmdComp     commands.Completion // completion for the current input
+	cmdHist     []string            // command history, newest first
+	cmdHistIdx  int                 // position while browsing history with ↑, or -1
+	cmdHistPath string              // shared history file ("" disables saving)
+	fmDrafts    map[string]string   // note key -> ":frontmatter" text that failed to apply
 
-	tagFilter string
-	query     string
-	allTasks  bool                   // Tasks tab: list every task instead of notes with tasks
-	showDone  bool                   // Tasks tab, all-tasks view: include checked tasks
-	dueTask   *taskItem              // task whose due date the input prompt is editing
-	links     *linkView              // b / f: show a note's backlinks or outgoing links
-	results   map[string]notes.Match // kind/id -> match while searching
+	tagFilter  string
+	query      string
+	allTasks   bool                   // Tasks tab: list every task instead of notes with tasks
+	taskShow   string                 // Tasks tab, all-tasks view: "open", "done" or "all"
+	taskWhen   string                 // all-tasks view: notes.WhenAny, WhenOverdue or WhenWeek
+	pick       *pickView              // a list of notes from a command (:recent, :git status)
+	fmOpen     bool                   // preview shows the full frontmatter (F toggles)
+	recentPath string                 // shared recent-notes file ("" disables)
+	dueTask    *taskItem              // task whose due date the input prompt is editing
+	links      *linkView              // b / f: show a note's backlinks or outgoing links
+	results    map[string]notes.Match // kind/id -> match while searching
 
 	status  string
 	isErr   bool
@@ -314,22 +352,28 @@ func newModel(app *cli.App, style string) model {
 	ti := textinput.New()
 	ti.CharLimit = 200
 
-	m := model{app: app, style: style, list: l, view: viewport.New(0, 0), help: viewport.New(0, 0), input: ti, cmdInput: newCmdInput(), cache: map[string]string{}}
+	m := model{app: app, style: style, list: l, view: viewport.New(0, 0), help: viewport.New(0, 0), input: ti, cmdInput: newCmdInput(), cache: map[string]string{}, cmdHistIdx: -1}
+	if p, err := commands.HistoryPath(); err == nil {
+		m.cmdHistPath = p
+		m.cmdHist = commands.LoadHistory(p)
+	}
+	if p, err := recent.Path(); err == nil {
+		m.recentPath = p
+	}
+	m.taskShow = "open"
+	m.fmOpen = !app.Cfg.FrontmatterCollapsed
 	m.reload()
+	m.applyStartPage()
 	return m
 }
 
-// pageItemHeight is the row height for page items: title, dates, tags.
-const pageItemHeight = 3
-
-// setItemHeight makes list rows tall enough for multi-line page items when
-// any are present, and keeps the compact two-line rows otherwise.
+// setItemHeight makes list rows tall enough for the tallest note item
+// (title plus its Description lines), and keeps two-line rows otherwise.
 func (m *model) setItemHeight(items []list.Item) {
 	h := 2
 	for _, it := range items {
-		if ni, ok := it.(noteItem); ok && ni.n.Kind == notes.KindPage {
-			h = pageItemHeight
-			break
+		if ni, ok := it.(noteItem); ok {
+			h = max(h, 1+strings.Count(ni.Description(), "\n")+1)
 		}
 	}
 	d := list.NewDefaultDelegate()
@@ -347,13 +391,19 @@ func (m *model) reload() {
 	var items []list.Item
 	var err error
 	switch {
+	case m.pick != nil:
+		for _, c := range m.pick.items {
+			if n, gerr := m.app.Store.Get(c.Kind, c.ID); gerr == nil {
+				items = append(items, noteItem{n: *n, match: c.Detail})
+			}
+		}
 	case m.links != nil:
 		items, err = m.linkItems()
 	case m.tab == tabTasks:
 		if m.allTasks {
 			// Every task, sorted by due date, then priority.
 			var all []notes.TaskRef
-			all, err = m.app.Store.AllTasks(notes.TaskFilter{IncludeDone: m.showDone})
+			all, err = m.app.Store.AllTasks(m.taskFilter())
 			for _, r := range all {
 				if m.taskMatches(notes.NoteTasks{Note: r.Note}, &r.Task) {
 					items = append(items, taskItem{n: r.Note, t: r.Task})
@@ -388,13 +438,17 @@ func (m *model) reload() {
 					continue
 				}
 				m.results[key(&r.Note)] = r
-				items = append(items, noteItem{r.Note})
+				it := noteItem{n: r.Note}
+				if len(r.Lines) > 0 {
+					it.match = strings.TrimSpace(r.Lines[0].Text)
+				}
+				items = append(items, it)
 			}
 		} else {
 			var ns []notes.Note
 			ns, err = m.app.Store.List(kind, notes.ListOpts{Tag: m.tagFilter})
 			for _, n := range ns {
-				items = append(items, noteItem{n})
+				items = append(items, noteItem{n: n})
 			}
 		}
 	}
@@ -426,7 +480,7 @@ func (m *model) linkItems() ([]list.Item, error) {
 		bl, err := m.app.Store.Backlinks(of.Kind, of.ID)
 		for _, b := range bl {
 			if n, err := m.app.Store.Get(b.Note.Kind, b.Note.ID); err == nil {
-				items = append(items, noteItem{*n})
+				items = append(items, noteItem{n: *n})
 			}
 		}
 		return items, err
@@ -444,7 +498,7 @@ func (m *model) linkItems() ([]list.Item, error) {
 			continue
 		}
 		if n, err := m.app.Store.Get(l.Kind, l.ID); err == nil {
-			items = append(items, noteItem{*n})
+			items = append(items, noteItem{n: *n})
 		}
 	}
 	return items, err
@@ -477,6 +531,48 @@ func (m *model) selectKey(k string) {
 		}
 	}
 	m.updatePreview()
+}
+
+// openLinks switches the list to n's backlinks (back) or outgoing links.
+func (m *model) openLinks(n *notes.Note, back bool) {
+	m.links = &linkView{back: back, of: *n}
+	m.list.Select(0)
+	m.reload()
+	if back {
+		m.setStatus(fmt.Sprintf("%d note(s) link to %s (esc closes)", len(m.list.Items()), n.Title))
+	} else {
+		m.setStatus(fmt.Sprintf("%s links to %d note(s) (esc closes)", n.Title, len(m.list.Items())))
+	}
+}
+
+// showNote selects n in the list, switching to its tab (and dropping the
+// tag filter and search if they hide it).
+func (m *model) showNote(n *notes.Note) {
+	m.clearViews()
+	want := tabPages
+	if n.Kind == notes.KindJournal {
+		want = tabJournal
+	}
+	if m.tab != want {
+		m.tab = want
+		m.list.Select(0)
+	}
+	m.reload()
+	k := key(n)
+	if itemKey(m.list.SelectedItem()) != k && !m.hasItem(k) {
+		m.tagFilter, m.query = "", ""
+		m.reload()
+	}
+	m.selectKey(k)
+}
+
+func (m *model) hasItem(k string) bool {
+	for _, it := range m.list.Items() {
+		if itemKey(it) == k {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *model) setErr(err error)   { m.status, m.isErr = err.Error(), true }
@@ -548,9 +644,7 @@ func (m *model) updatePreview() {
 						out = r
 					}
 				}
-				if len(full.Tags) > 0 {
-					out = filterStyle.Render("  #"+strings.Join(full.Tags, " #")) + "\n" + out
-				}
+				out = m.frontmatterView(full) + out
 			}
 			m.cache[k] = out
 		}
@@ -572,8 +666,8 @@ func (m *model) updatePreview() {
 		msg := "\n  Nothing here yet. Press n to create a note, T for today's journal."
 		if m.tab == tabTasks {
 			msg = "\n  No tasks found. Add \"- [ ] something\" to a note."
-			if m.allTasks && !m.showDone {
-				msg += "\n  (done tasks are hidden: press a to show them)"
+			if m.allTasks && (m.taskShow != "all" || m.taskWhen != notes.WhenAny) {
+				msg += "\n  (filtered: " + m.taskFilterText() + ". a / w change it)"
 			}
 		}
 		content = statusStyle.Render(msg)
@@ -597,6 +691,7 @@ func (m *model) editCmd(n *notes.Note) tea.Cmd { return m.editCmdAt(n, 0) }
 // (glow, mdcat…) take over the screen until they exit; windowed ones
 // (katdown…) start alongside the TUI.
 func (m *model) previewCmd(n *notes.Note) tea.Cmd {
+	m.touchRecent(n)
 	c, inTerminal, err := editor.PreviewCommand(m.app.Cfg.Previewer, m.app.Cfg.PreviewerMode, n.Path)
 	if err != nil {
 		m.setErr(err)
@@ -615,6 +710,7 @@ func (m *model) previewCmd(n *notes.Note) tea.Cmd {
 
 // editCmdAt opens n in the editor at 1-based file line `line` (0 = top).
 func (m *model) editCmdAt(n *notes.Note, line int) tea.Cmd {
+	m.touchRecent(n)
 	before := m.app.Store.ModTime(n.Kind, n.ID)
 	c, err := editor.CommandAt(m.app.Cfg.Editor, n.Path, line)
 	if err != nil {
@@ -631,6 +727,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.layout()
 		return m, nil
 
+	case cmdResultMsg:
+		return m, m.applyResult(msg.line, msg.r, msg.err)
+	case fmEditedMsg:
+		m.afterFrontmatterEdit(msg)
+		return m, nil
 	case shellDoneMsg:
 		// A non-zero exit just means the last command in the shell failed.
 		var exit *exec.ExitError
@@ -688,25 +789,32 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "tab", "right", "l":
 		m.tab = (m.tab + 1) % tab(len(tabNames))
-		m.links = nil
+		m.clearViews()
 		m.list.Select(0)
 		m.reload()
 		return m, nil
 	case "shift+tab", "left", "h":
 		m.tab = (m.tab + tab(len(tabNames)) - 1) % tab(len(tabNames))
-		m.links = nil
+		m.clearViews()
 		m.list.Select(0)
 		m.reload()
 		return m, nil
 	case "1", "2", "3", "4":
 		m.tab = tab(msg.String()[0] - '1')
-		m.links = nil
+		m.clearViews()
 		m.list.Select(0)
 		m.reload()
 		return m, nil
 	case "esc":
+		if m.pick != nil {
+			m.pick = nil
+			m.list.Select(0)
+			m.setStatus(m.pickClosedStatus())
+			m.reload()
+			return m, nil
+		}
 		if m.links != nil {
-			m.links = nil
+			m.clearViews()
 			m.list.Select(0)
 			m.setStatus("links view closed")
 			m.reload()
@@ -737,7 +845,7 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.setStatus("created " + key(n))
 		}
 		m.tab = tabJournal
-		m.links = nil
+		m.clearViews()
 		m.reload()
 		m.selectKey(key(n))
 		return m, m.editCmd(n)
@@ -764,13 +872,27 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "a":
 		if m.tab == tabTasks && m.allTasks {
-			m.showDone = !m.showDone
+			m.taskShow = map[string]string{"open": "done", "done": "all", "all": "open"}[m.taskShow]
 			m.reload()
-			if m.showDone {
-				m.setStatus("showing done tasks")
-			} else {
-				m.setStatus("hiding done tasks")
-			}
+			m.setStatus("tasks: " + m.taskFilterText())
+		}
+		return m, nil
+	case "w":
+		if m.tab == tabTasks && m.allTasks {
+			m.taskWhen = map[string]string{notes.WhenAny: notes.WhenOverdue, notes.WhenOverdue: notes.WhenWeek, notes.WhenWeek: notes.WhenAny}[m.taskWhen]
+			m.reload()
+			m.setStatus("tasks: " + m.taskFilterText())
+		}
+		return m, nil
+	case "F":
+		m.fmOpen = !m.fmOpen
+		m.cache = map[string]string{}
+		m.preview = ""
+		m.updatePreview()
+		if m.fmOpen {
+			m.setStatus("frontmatter shown")
+		} else {
+			m.setStatus("frontmatter collapsed")
 		}
 		return m, nil
 	case "x", " ":
@@ -792,17 +914,8 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "b", "f":
-		n := m.selected()
-		if n == nil {
-			return m, nil
-		}
-		m.links = &linkView{back: msg.String() == "b", of: *n}
-		m.list.Select(0)
-		m.reload()
-		if m.links.back {
-			m.setStatus(fmt.Sprintf("%d note(s) link to %s (esc closes)", len(m.list.Items()), n.Title))
-		} else {
-			m.setStatus(fmt.Sprintf("%s links to %d note(s) (esc closes)", n.Title, len(m.list.Items())))
+		if n := m.selected(); n != nil {
+			m.openLinks(n, msg.String() == "b")
 		}
 		return m, nil
 	case "@":
@@ -825,6 +938,15 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "e", "enter":
+		if m.pick != nil && msg.String() == "enter" {
+			if n := m.selected(); n != nil {
+				m.pick = nil
+				m.touchRecent(n)
+				m.showNote(n)
+				m.setStatus("opened " + key(n) + " (enter edits)")
+			}
+			return m, nil
+		}
 		switch it := m.list.SelectedItem().(type) {
 		case missingItem:
 			n, _, err := m.app.Store.Ensure(it.l.Kind, it.l.ID, it.l.Text)
@@ -850,7 +972,7 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if it, ok := m.list.SelectedItem().(tagItem); ok {
 			m.tagFilter = it.t.Tag
 			m.tab = tabPages
-			m.links = nil
+			m.clearViews()
 			m.list.Select(0)
 			m.setStatus("filtering by #" + it.t.Tag + " (esc clears)")
 			m.reload()
@@ -950,6 +1072,7 @@ func (m model) submit(val string) (tea.Model, tea.Cmd) {
 				m.setErr(err)
 				return m, nil
 			}
+			recent.Rename(m.recentPath, key(n), key(r)) //nolint:errcheck // a convenience
 			msg := "renamed to " + key(r)
 			if len(relinked) > 0 {
 				msg += fmt.Sprintf(" · updated links in %d note(s)", len(relinked))
@@ -971,6 +1094,7 @@ func (m model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.setErr(err)
 		} else {
 			m.setStatus("deleted " + key(n))
+			recent.Forget(m.recentPath, key(n)) //nolint:errcheck // a convenience
 		}
 		m.reload()
 	} else {
@@ -1010,6 +1134,12 @@ func (m model) View() string {
 	}
 	if m.query != "" {
 		filters = append(filters, fmt.Sprintf("search %q", m.query))
+	}
+	if m.pick != nil {
+		filters = append(filters, m.pick.title)
+	}
+	if m.tab == tabTasks && m.allTasks {
+		filters = append(filters, m.taskFilterText())
 	}
 	if m.links != nil {
 		if m.links.back {
@@ -1069,6 +1199,7 @@ var (
 	helpVersion = lipgloss.NewStyle().Italic(true).Foreground(lipgloss.Color("#E0AF68"))
 	helpSection = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#9D7DF8"))
 	helpKey     = lipgloss.NewStyle().Bold(true).Width(16)
+	helpCmd     = lipgloss.NewStyle().Bold(true)
 )
 
 type helpEntry struct{ key, desc string }
@@ -1091,12 +1222,14 @@ var helpSections = []struct {
 		{"d / delete", "delete (asks to confirm)"},
 		{"T", "open today's journal"},
 		{"R", "reload from disk"},
+		{"F", "show or collapse the frontmatter above the preview"},
 	}},
 	{"Tasks tab", []helpEntry{
 		{"v", "switch: notes with tasks / all tasks"},
 		{"enter / e", "edit the note at the (first open) task line"},
 		{"x / space", "check or uncheck the selected task"},
-		{"a", "all-tasks view: show or hide done tasks"},
+		{"a", "all-tasks view: cycle open → done → all"},
+		{"w", "all-tasks view: cycle any date → overdue → due this week"},
 		{"@", "all-tasks view: set the due date (today, tom, fri, +3d, …)"},
 		{"p", "all-tasks view: cycle priority (high → med → low → none)"},
 	}},
@@ -1104,13 +1237,13 @@ var helpSections = []struct {
 		{"/", "full-text search"},
 		{"t", "filter by tag"},
 		{"enter", "on the Tags tab: filter by that tag"},
-		{"esc", "clear search and tag filter (or close the links view)"},
+		{"esc", "clear search and tag filter (or close the links / :recent list)"},
 		{"o", "open the selected note in the Markdown previewer (config: previewer)"},
 		{"b", "notes that link to the selected note (backlinks)"},
 		{"f", "notes the selected note links to; enter on (missing) creates it"},
 	}},
 	{"General", []helpEntry{
-		{":", "command window (e.g. :sync-tasks updates contains_task everywhere)"},
+		{":", "command window: :open, :tag add, :set, :frontmatter… (tab completes, ↑ history)"},
 		{"? / F1", "toggle this help"},
 		{"q / ctrl+c", "quit"},
 	}},
@@ -1126,6 +1259,11 @@ func helpBody() string {
 		for _, e := range sec.entries {
 			b.WriteString("  " + helpKey.Render(e.key) + e.desc + "\n")
 		}
+	}
+	// The same command list as the GUI's help (from the shared catalog).
+	b.WriteString("\n" + helpSection.Render("Commands (:)") + "\n")
+	for _, c := range commands.Catalog(commands.AppTUI) {
+		b.WriteString("  " + helpCmd.Render(":"+c.Usage()) + "\n      " + c.Desc + "\n")
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
