@@ -7,6 +7,8 @@
   import { SLASH, matchSlash, mergeSlash, slashQuery, slashToken, expandSlash, applyUserResult, caretXY, rank, type SlashCommand } from './slash';
   import { linkQuery, linkSuggestions, linkMarkdown, linkText, applyLink, decorateLinks, type NoteRef, type LinkSuggestion } from './links';
   import EditorMenu from './EditorMenu.svelte';
+  // The app icon (build/appicon.svg), shown in the help window.
+  import appIcon from '../../build/appicon.svg';
   import { Browser, Clipboard } from '@wailsio/runtime';
   import { NotesService as api } from '../bindings/github.com/devinthemtn/katnotes/katnotes-gui';
   import type { ThemeInfo } from '../bindings/github.com/devinthemtn/katnotes/katnotes-gui/models';
@@ -2190,9 +2192,12 @@
   <div class="backdrop" role="presentation" onclick={() => (helpOpen = false)}>
     <div class="modal help" role="dialog" aria-label="Keyboard help" tabindex="-1" onclick={(e) => e.stopPropagation()} onkeydown={() => {}}>
       <header class="help-head">
-        <div>
-          <div class="help-title">Keyboard help</div>
-          <div class="help-sub">KatNotes desktop</div>
+        <div class="help-brand">
+          <img class="help-icon" src={appIcon} alt="" width="44" height="44" />
+          <div>
+            <div class="help-title">Keyboard help</div>
+            <div class="help-sub">KatNotes desktop</div>
+          </div>
         </div>
         <span class="version-pill">katnotes-gui {version || 'dev'}</span>
       </header>
