@@ -12,9 +12,15 @@ import (
 
 // Resolve returns the editor command (program plus args) to use. Order:
 // configured value, $VISUAL, $EDITOR, then nano, vim, vi, whichever exists.
+// Values are split with shell-style quoting (SplitArgs): two single quotes
+// are an empty argument, as emacsclient -a wants.
 func Resolve(configured string) ([]string, error) {
 	for _, c := range []string{configured, os.Getenv("VISUAL"), os.Getenv("EDITOR")} {
-		if f := strings.Fields(c); len(f) > 0 {
+		f, err := SplitArgs(c)
+		if err != nil {
+			return nil, fmt.Errorf("editor %q: %w", c, err)
+		}
+		if len(f) > 0 {
 			return f, nil
 		}
 	}

@@ -105,3 +105,17 @@ func TestSplitArgs(t *testing.T) {
 		}
 	}
 }
+
+func TestResolveQuoting(t *testing.T) {
+	argv, err := Resolve("emacsclient -nw -a ''")
+	if err != nil || !reflect.DeepEqual(argv, []string{"emacsclient", "-nw", "-a", ""}) {
+		t.Errorf("Resolve = %q, %v", argv, err)
+	}
+	c, err := CommandAt("emacsclient -nw -a ''", "/n.md", 3)
+	if err != nil || !reflect.DeepEqual(c.Args, []string{"emacsclient", "-nw", "-a", "", "+3", "/n.md"}) {
+		t.Errorf("CommandAt = %q, %v", c.Args, err)
+	}
+	if _, err := Resolve(`vim "unclosed`); err == nil {
+		t.Error("unclosed quote accepted")
+	}
+}

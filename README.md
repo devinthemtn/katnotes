@@ -41,7 +41,7 @@ Frontmatter keys that KatNotes doesn't know are kept when a note is saved. A fil
 
 ```toml
 notes_dir = "~/KatNotes"
-editor = ""                 # falls back to $VISUAL, then $EDITOR, then nano/vim/vi
+editor = ""                 # falls back to $VISUAL, then $EDITOR, then nano/vim/vi; quotes work as in a shell, e.g. "emacsclient -nw -a ''"
 previewer = ""              # TUI "o": Markdown viewer, e.g. "katdown" or "glow -p"; empty tries katdown, glow, frogmouth, mdcat
 previewer_mode = "auto"     # auto (glow/mdcat/bat/less… use the terminal, others open a window), terminal or window
 default_kind = "page"       # what `katnotes new` makes
