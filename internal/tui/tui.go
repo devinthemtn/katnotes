@@ -4,6 +4,7 @@ package tui
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -166,6 +167,21 @@ func dueLabel(t notes.Task, now time.Time) string {
 }
 func (i taskItem) FilterValue() string { return i.t.Text }
 
+// missingItem is a link target that doesn't exist yet (links view).
+type missingItem struct{ l notes.LinkRef }
+
+func (i missingItem) Title() string { return "(missing) " + i.l.Title }
+func (i missingItem) Description() string {
+	return fmt.Sprintf("%s/%s · enter creates it", i.l.Kind, i.l.ID)
+}
+func (i missingItem) FilterValue() string { return i.l.Title }
+
+// linkView lists the notes linking to a note (back) or the notes it links to.
+type linkView struct {
+	back bool
+	of   notes.Note
+}
+
 func firstOpen(ts []notes.Task) (notes.Task, bool) {
 	for _, t := range ts {
 		if !t.Done {
@@ -197,6 +213,8 @@ func itemKey(it list.Item) string {
 		return key(&v.nt.Note)
 	case taskItem:
 		return fmt.Sprintf("%s#%d", key(&v.n), v.t.Line)
+	case missingItem:
+		return "missing:" + string(v.l.Kind) + "/" + v.l.ID
 	}
 	return ""
 }
@@ -222,6 +240,9 @@ func (m *model) taskMatches(nt notes.NoteTasks, t *notes.Task) bool {
 }
 
 // messages
+
+// previewedMsg reports that a terminal previewer exited.
+type previewedMsg struct{ err error }
 
 type editedMsg struct {
 	n      *notes.Note
@@ -267,6 +288,7 @@ type model struct {
 	allTasks  bool                   // Tasks tab: list every task instead of notes with tasks
 	showDone  bool                   // Tasks tab, all-tasks view: include checked tasks
 	dueTask   *taskItem              // task whose due date the input prompt is editing
+	links     *linkView              // b / f: show a note's backlinks or outgoing links
 	results   map[string]notes.Match // kind/id -> match while searching
 
 	status  string
@@ -303,8 +325,10 @@ func (m *model) reload() {
 	sel := itemKey(m.list.SelectedItem())
 	var items []list.Item
 	var err error
-	switch m.tab {
-	case tabTasks:
+	switch {
+	case m.links != nil:
+		items, err = m.linkItems()
+	case m.tab == tabTasks:
 		if m.allTasks {
 			// Every task, sorted by due date, then priority.
 			var all []notes.TaskRef
@@ -323,7 +347,7 @@ func (m *model) reload() {
 				items = append(items, taskNoteItem{nt})
 			}
 		}
-	case tabTags:
+	case m.tab == tabTags:
 		var tags []notes.TagCount
 		tags, err = m.app.Store.SortedTags()
 		for _, t := range tags {
@@ -370,6 +394,56 @@ func (m *model) reload() {
 	}
 	m.preview = ""
 	m.updatePreview()
+}
+
+// linkItems lists the notes for the b / f links view.
+func (m *model) linkItems() ([]list.Item, error) {
+	var items []list.Item
+	of := m.links.of
+	if m.links.back {
+		bl, err := m.app.Store.Backlinks(of.Kind, of.ID)
+		for _, b := range bl {
+			if n, err := m.app.Store.Get(b.Note.Kind, b.Note.ID); err == nil {
+				items = append(items, noteItem{*n})
+			}
+		}
+		return items, err
+	}
+	ls, err := m.app.Store.Links(of.Kind, of.ID)
+	seen := map[string]bool{}
+	for _, l := range ls {
+		k := string(l.Kind) + "/" + l.ID
+		if seen[k] {
+			continue
+		}
+		seen[k] = true
+		if !l.Exists {
+			items = append(items, missingItem{l})
+			continue
+		}
+		if n, err := m.app.Store.Get(l.Kind, l.ID); err == nil {
+			items = append(items, noteItem{*n})
+		}
+	}
+	return items, err
+}
+
+// linkedFrom is the preview footer listing the notes that link to n.
+func (m *model) linkedFrom(n *notes.Note) string {
+	bl, err := m.app.Store.Backlinks(n.Kind, n.ID)
+	if err != nil || len(bl) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n" + filterStyle.Render(fmt.Sprintf("  Linked from (%d)", len(bl))) + statusStyle.Render("  · b lists them") + "\n")
+	for _, x := range bl {
+		line := x.Lines[0].Text
+		if r := []rune(line); len(r) > 60 {
+			line = string(r[:59]) + "…"
+		}
+		fmt.Fprintf(&b, "  • %s %s\n", x.Note.Title, statusStyle.Render(line))
+	}
+	return b.String()
 }
 
 // selectKey moves the cursor to the note with key k, if listed.
@@ -458,7 +532,10 @@ func (m *model) updatePreview() {
 			}
 			m.cache[k] = out
 		}
-		content = out
+		content = out + m.linkedFrom(n)
+	} else if it, ok := m.list.SelectedItem().(missingItem); ok {
+		k = "missing:" + string(it.l.Kind) + "/" + it.l.ID
+		content = statusStyle.Render(fmt.Sprintf("\n  %s/%s doesn't exist yet.\n\n  enter: create it and open it in your editor", it.l.Kind, it.l.ID))
 	} else if it, ok := m.list.SelectedItem().(tagItem); ok {
 		k = "tag:" + it.t.Tag
 		ns, _ := m.app.Store.List("", notes.ListOpts{Tag: it.t.Tag})
@@ -494,6 +571,26 @@ func (m *model) startInput(p inputPurpose, prompt, value string) tea.Cmd {
 
 func (m *model) editCmd(n *notes.Note) tea.Cmd { return m.editCmdAt(n, 0) }
 
+// previewCmd opens n in the configured Markdown previewer. Terminal viewers
+// (glow, mdcat…) take over the screen until they exit; windowed ones
+// (katdown…) start alongside the TUI.
+func (m *model) previewCmd(n *notes.Note) tea.Cmd {
+	c, inTerminal, err := editor.PreviewCommand(m.app.Cfg.Previewer, m.app.Cfg.PreviewerMode, n.Path)
+	if err != nil {
+		m.setErr(err)
+		return nil
+	}
+	if inTerminal {
+		return tea.ExecProcess(c, func(err error) tea.Msg { return previewedMsg{err} })
+	}
+	if err := editor.StartDetached(c); err != nil {
+		m.setErr(fmt.Errorf("previewer: %w", err))
+		return nil
+	}
+	m.setStatus("opened " + key(n) + " in " + filepath.Base(c.Args[0]))
+	return nil
+}
+
 // editCmdAt opens n in the editor at 1-based file line `line` (0 = top).
 func (m *model) editCmdAt(n *notes.Note, line int) tea.Cmd {
 	before := m.app.Store.ModTime(n.Kind, n.ID)
@@ -512,6 +609,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.layout()
 		return m, nil
 
+	case previewedMsg:
+		if msg.err != nil {
+			m.setErr(fmt.Errorf("previewer: %w", msg.err))
+		}
+		return m, nil
 	case editedMsg:
 		if msg.err != nil {
 			m.setErr(fmt.Errorf("editor: %w", msg.err))
@@ -555,20 +657,30 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "tab", "right", "l":
 		m.tab = (m.tab + 1) % tab(len(tabNames))
+		m.links = nil
 		m.list.Select(0)
 		m.reload()
 		return m, nil
 	case "shift+tab", "left", "h":
 		m.tab = (m.tab + tab(len(tabNames)) - 1) % tab(len(tabNames))
+		m.links = nil
 		m.list.Select(0)
 		m.reload()
 		return m, nil
 	case "1", "2", "3", "4":
 		m.tab = tab(msg.String()[0] - '1')
+		m.links = nil
 		m.list.Select(0)
 		m.reload()
 		return m, nil
 	case "esc":
+		if m.links != nil {
+			m.links = nil
+			m.list.Select(0)
+			m.setStatus("links view closed")
+			m.reload()
+			return m, nil
+		}
 		if m.query != "" || m.tagFilter != "" {
 			m.query, m.tagFilter = "", ""
 			m.setStatus("filters cleared")
@@ -594,6 +706,7 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.setStatus("created " + key(n))
 		}
 		m.tab = tabJournal
+		m.links = nil
 		m.reload()
 		m.selectKey(key(n))
 		return m, m.editCmd(n)
@@ -642,6 +755,25 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.reload()
 		}
 		return m, nil
+	case "o":
+		if n := m.selected(); n != nil {
+			return m, m.previewCmd(n)
+		}
+		return m, nil
+	case "b", "f":
+		n := m.selected()
+		if n == nil {
+			return m, nil
+		}
+		m.links = &linkView{back: msg.String() == "b", of: *n}
+		m.list.Select(0)
+		m.reload()
+		if m.links.back {
+			m.setStatus(fmt.Sprintf("%d note(s) link to %s (esc closes)", len(m.list.Items()), n.Title))
+		} else {
+			m.setStatus(fmt.Sprintf("%s links to %d note(s) (esc closes)", n.Title, len(m.list.Items())))
+		}
+		return m, nil
 	case "@":
 		if it, ok := m.list.SelectedItem().(taskItem); ok {
 			m.dueTask = &it
@@ -663,6 +795,16 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "e", "enter":
 		switch it := m.list.SelectedItem().(type) {
+		case missingItem:
+			n, _, err := m.app.Store.Ensure(it.l.Kind, it.l.ID, it.l.Text)
+			if err != nil {
+				m.setErr(err)
+				return m, nil
+			}
+			m.setStatus("created " + key(n))
+			m.reload()
+			m.selectKey(key(n))
+			return m, m.editCmd(n)
 		case taskItem:
 			n := it.n
 			return m, m.editCmdAt(&n, m.app.Store.FileLine(n.Kind, n.ID, it.t.Line))
@@ -677,6 +819,7 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if it, ok := m.list.SelectedItem().(tagItem); ok {
 			m.tagFilter = it.t.Tag
 			m.tab = tabPages
+			m.links = nil
 			m.list.Select(0)
 			m.setStatus("filtering by #" + it.t.Tag + " (esc clears)")
 			m.reload()
@@ -771,12 +914,17 @@ func (m model) submit(val string) (tea.Model, tea.Cmd) {
 		m.reload()
 	case inRename:
 		if n := m.selected(); n != nil && val != "" {
-			r, err := m.app.Store.Rename(n.Kind, n.ID, val)
+			r, relinked, err := m.app.Store.Rename(n.Kind, n.ID, val)
 			if err != nil {
 				m.setErr(err)
 				return m, nil
 			}
-			m.setStatus("renamed to " + key(r))
+			msg := "renamed to " + key(r)
+			if len(relinked) > 0 {
+				msg += fmt.Sprintf(" · updated links in %d note(s)", len(relinked))
+			}
+			m.cache = map[string]string{}
+			m.setStatus(msg)
 			m.reload()
 			m.selectKey(key(r))
 		}
@@ -832,6 +980,13 @@ func (m model) View() string {
 	if m.query != "" {
 		filters = append(filters, fmt.Sprintf("search %q", m.query))
 	}
+	if m.links != nil {
+		if m.links.back {
+			filters = append(filters, "linking to "+m.links.of.Title)
+		} else {
+			filters = append(filters, "linked from "+m.links.of.Title)
+		}
+	}
 	filterLine := fmt.Sprintf(" %d item(s)", len(m.list.Items()))
 	if len(filters) > 0 {
 		filterLine += "  " + filterStyle.Render("filter: "+strings.Join(filters, " + ")+"  (esc clears)")
@@ -864,7 +1019,7 @@ func (m model) View() string {
 	if m.mode == modeHelp {
 		return m.helpView()
 	}
-	help := statusStyle.Render(": commands · ? help · n new · enter/e edit · r rename · d delete · T today · / search · t tag · tab switch · J/K scroll · q quit")
+	help := statusStyle.Render(": commands · ? help · n new · enter/e edit · o preview · r rename · d delete · T today · / search · t tag · tab switch · J/K scroll · q quit")
 	if m.tab == tabTasks {
 		view := "v all tasks"
 		if m.allTasks {
@@ -918,7 +1073,10 @@ var helpSections = []struct {
 		{"/", "full-text search"},
 		{"t", "filter by tag"},
 		{"enter", "on the Tags tab: filter by that tag"},
-		{"esc", "clear search and tag filter"},
+		{"esc", "clear search and tag filter (or close the links view)"},
+		{"o", "open the selected note in the Markdown previewer (config: previewer)"},
+		{"b", "notes that link to the selected note (backlinks)"},
+		{"f", "notes the selected note links to; enter on (missing) creates it"},
 	}},
 	{"General", []helpEntry{
 		{":", "command window (e.g. :sync-tasks updates contains_task everywhere)"},

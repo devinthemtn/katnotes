@@ -39,6 +39,7 @@ var commands = []tuiCommand{
 	}},
 	{"tasks", "Go to the Tasks tab", func(m *model) tea.Cmd {
 		m.tab = tabTasks
+		m.links = nil
 		m.list.Select(0)
 		m.reload()
 		return nil

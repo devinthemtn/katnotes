@@ -144,15 +144,51 @@ func (s *NotesService) Save(kind, id string, tags []string, body, baseUpdated st
 	return n, st.Save(n)
 }
 
-// Rename changes a note's title (pages also move to the new slug).
-func (s *NotesService) Rename(kind, id, title string) (*notes.Note, error) {
+// RenameResult is a renamed note and the notes whose links were updated.
+type RenameResult struct {
+	Note    *notes.Note `json:"note"`
+	Updated []string    `json:"updated"`
+}
+
+// Rename changes a note's title. Pages also move to the new slug, and links
+// to them in other notes are rewritten.
+func (s *NotesService) Rename(kind, id, title string) (*RenameResult, error) {
 	st := s.lock()
 	defer s.mu.Unlock()
 	k, err := notes.ParseKind(kind)
 	if err != nil {
 		return nil, err
 	}
-	return st.Rename(k, id, title)
+	n, updated, err := st.Rename(k, id, title)
+	if updated == nil {
+		updated = []string{}
+	}
+	if n == nil {
+		return nil, err
+	}
+	return &RenameResult{Note: n, Updated: updated}, err
+}
+
+// Links lists a note's outgoing links to other notes.
+func (s *NotesService) Links(kind, id string) ([]notes.LinkRef, error) {
+	st := s.lock()
+	defer s.mu.Unlock()
+	k, err := notes.ParseKind(kind)
+	if err != nil {
+		return nil, err
+	}
+	return st.Links(k, id)
+}
+
+// Backlinks lists the notes that link to a note, with the linking lines.
+func (s *NotesService) Backlinks(kind, id string) ([]notes.Backlink, error) {
+	st := s.lock()
+	defer s.mu.Unlock()
+	k, err := notes.ParseKind(kind)
+	if err != nil {
+		return nil, err
+	}
+	return st.Backlinks(k, id)
 }
 
 // Delete removes a note.
@@ -379,4 +415,17 @@ func (s *NotesService) TaskMetaStats() ([]notes.MetaKeyStat, error) {
 		out = []notes.MetaKeyStat{}
 	}
 	return out, err
+}
+
+// EnsureNote returns a note, creating it first if it doesn't exist (used when
+// following a link to a missing note). New pages keep exactly this id.
+func (s *NotesService) EnsureNote(kind, id, title string) (*notes.Note, error) {
+	st := s.lock()
+	defer s.mu.Unlock()
+	k, err := notes.ParseKind(kind)
+	if err != nil {
+		return nil, err
+	}
+	n, _, err := st.Ensure(k, id, title)
+	return n, err
 }

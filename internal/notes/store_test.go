@@ -119,7 +119,7 @@ func TestCRUD(t *testing.T) {
 		t.Errorf("times: created %v updated %v", again.Created, again.Updated)
 	}
 
-	r, err := s.Rename(KindPage, "hello-world", "Goodbye World")
+	r, _, err := s.Rename(KindPage, "hello-world", "Goodbye World")
 	if err != nil {
 		t.Fatal(err)
 	}

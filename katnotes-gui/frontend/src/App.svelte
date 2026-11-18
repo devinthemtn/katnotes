@@ -5,8 +5,11 @@
   import { checkboxHTML, decorateTasks, toggleTask, makeTask, setTaskLine, setTaskMetaLine, metaChips, setStampDone, dateState, today, ensureMetaBlock } from './tasks';
   import { metaContext, suggest, applySuggestion, shouldPairBrace, type MetaContext, type MetaStat, type Suggestion } from './metacomplete';
   import { SLASH, matchSlash, mergeSlash, slashQuery, slashToken, expandSlash, applyUserResult, caretXY, rank, type SlashCommand } from './slash';
+  import { linkQuery, linkSuggestions, linkMarkdown, linkText, applyLink, decorateLinks, type NoteRef, type LinkSuggestion } from './links';
+  import EditorMenu from './EditorMenu.svelte';
+  import { Browser } from '@wailsio/runtime';
   import { NotesService as api } from '../bindings/github.com/devinthemtn/katnotes/katnotes-gui';
-  import type { Note, Match, TagCount, NoteTasks, Task } from '../bindings/github.com/devinthemtn/katnotes/internal/notes';
+  import type { Note, Match, TagCount, NoteTasks, Task, Backlink } from '../bindings/github.com/devinthemtn/katnotes/internal/notes';
   import type { Config } from '../bindings/github.com/devinthemtn/katnotes/internal/config';
 
   marked.use({ renderer: { checkbox: checkboxHTML } });
@@ -101,6 +104,43 @@
   let metaStats: MetaStat[] = $state([]);
   let metaItems: Suggestion[] = $derived(metaOpen && metaCtx ? suggest(metaCtx, metaStats) : []);
 
+  // editor [[ link picker
+  let linkOpen = $state(false);
+  let linkSel = $state(0);
+  let linkQ = $state({ q: '', start: 0 });
+  let linkPos = $state({ left: 0, top: 0, above: false });
+  // Every note (title and id), for the picker and for marking missing links.
+  let linkTargets: NoteRef[] = $state([]);
+  let linkKeys = $derived(new Set(linkTargets.map((n) => `${n.kind}/${n.id}`)));
+  let linkItems: LinkSuggestion[] = $derived(linkOpen ? linkSuggestions(linkQ.q, linkTargets) : []);
+  // Notes linking to the open note.
+  let backlinks: Backlink[] = $state([]);
+
+  async function loadLinkTargets() {
+    try {
+      linkTargets = ((await api.List('', '')) ?? []).map((n) => ({ kind: n.kind, id: n.id, title: n.title }));
+    } catch {
+      /* picker just has fewer notes */
+    }
+  }
+
+  async function loadBacklinks() {
+    const n = current;
+    if (!n) {
+      backlinks = [];
+      return;
+    }
+    try {
+      const bl = (await api.Backlinks(n.kind, n.id)) ?? [];
+      if (current && keyOf(current) === keyOf(n)) backlinks = bl;
+    } catch {
+      backlinks = [];
+    }
+  }
+
+  // A backlink line with its Markdown links shown as their text.
+  const plainLinks = (line: string) => line.replace(/!?\[((?:\\.|[^\]\\])*)\]\([^)]*\)/g, '$1');
+
   async function loadMetaStats() {
     try {
       metaStats = (await api.TaskMetaStats()) ?? [];
@@ -142,6 +182,8 @@
       ['/', `In the editor: slash commands (${SLASH.map((c) => c.name).join(', ')})`],
       ['/your-command', 'Lua commands from ~/.config/katnotes/commands/*.lua (:reload after editing)'],
       [`${modLabel}+Enter`, 'In the editor: make the line a task, or check/uncheck it'],
+      ['[[', 'In the editor: link to a page or journal day; saved as a Markdown link'],
+      ['Click a link', 'In the preview: open the note (a missing one is created first)'],
       ['{', 'On a task line: start a {key:value} block; suggests due, pri, start and your keys, then values'],
       ['Ctrl+Space', 'On a task line: open the {…} suggestions (adds the block if needed)'],
       ['Click a box', 'In the preview: check or uncheck a task'],
@@ -199,7 +241,13 @@
   const keyOf = (n: { kind: string; id: string }) => `${n.kind}/${n.id}`;
 
   let preview = $derived(
-    DOMPurify.sanitize(decorateTasks(marked.parse(draftBody, { async: false, gfm: true, breaks: false }) as string))
+    DOMPurify.sanitize(
+      decorateLinks(
+        decorateTasks(marked.parse(draftBody, { async: false, gfm: true, breaks: false }) as string),
+        (current as Note | null)?.kind ?? 'page',
+        (kind, id) => linkKeys.has(`${kind}/${id}`),
+      ),
+    )
   );
 
   function parseTags(s: string): string[] {
@@ -239,7 +287,11 @@
   function setCurrent(n: Note | null) {
     slashOpen = false;
     metaOpen = false;
+    linkOpen = false;
+    const changed = (n ? keyOf(n) : '') !== (current ? keyOf(current) : '');
     current = n;
+    if (changed) backlinks = [];
+    loadBacklinks();
     if (n) savePref('lastNote', keyOf(n));
     conflict = false;
     dirty = false;
@@ -282,6 +334,7 @@
       }
       await refreshList();
       loadMetaStats();
+      loadBacklinks();
     } catch (e) {
       const msg = errMsg(e);
       saveState = 'error';
@@ -317,11 +370,13 @@
     await flushSave();
     try {
       const r = await api.Rename(current.kind, current.id, t);
-      if (r) {
-        setCurrent(r);
-        flash(`renamed to ${keyOf(r)}`);
+      if (r?.note) {
+        setCurrent(r.note);
+        const n = r.updated?.length ?? 0;
+        flash(`renamed to ${keyOf(r.note)}${n ? ` · updated links in ${n} note${n === 1 ? '' : 's'}` : ''}`);
       }
       await refreshList();
+      loadLinkTargets();
     } catch (e) {
       draftTitle = current.title;
       flash(errMsg(e), true);
@@ -350,6 +405,7 @@
       if (tab === 'tags' || tab === 'tasks') tab = 'page';
       mainView = 'note';
       await refreshList();
+      loadLinkTargets();
       if (n) {
         setCurrent(n);
         flash(`created ${keyOf(n)}`);
@@ -391,6 +447,7 @@
       setCurrent(null);
       flash(`deleted ${keyOf(n)}`);
       await refreshList();
+      loadLinkTargets();
     } catch (e) {
       flash(errMsg(e), true);
     }
@@ -416,6 +473,7 @@
   function setView(m: ViewMode) {
     slashOpen = false;
     metaOpen = false;
+    linkOpen = false;
     viewMode = m;
     savePref('viewMode', m);
   }
@@ -536,6 +594,8 @@
   // Pick up edits made by the CLI/TUI when the window regains focus.
   async function onFocus() {
     await refreshList();
+    loadLinkTargets();
+    loadBacklinks();
     if (current && !dirty) {
       try {
         const fresh = await api.Get(current.kind, current.id);
@@ -714,6 +774,7 @@
   async function showTasks() {
     slashOpen = false;
     metaOpen = false;
+    linkOpen = false;
     mainView = 'tasks';
     taskNotes = (await api.Tasks().catch(() => taskNotes)) ?? [];
   }
@@ -907,6 +968,63 @@
     slashPos = menuPos(l!.pos - q.length - 1);
     slashOpen = true;
     metaOpen = false;
+    linkOpen = false;
+  }
+
+  // Re-check whether the caret is after "[[query" and show/hide the picker.
+  function updateLink() {
+    const l = caretLine();
+    const lq = l && !slashOpen ? linkQuery(l.text.slice(0, l.col)) : null;
+    if (!bodyEl || !lq) {
+      linkOpen = false;
+      return;
+    }
+    if (!linkOpen || lq.start !== linkQ.start) linkSel = 0;
+    else if (lq.q !== linkQ.q) linkSel = 0;
+    linkQ = lq;
+    linkPos = menuPos(l!.start + lq.start);
+    linkOpen = true;
+    metaOpen = false;
+  }
+
+  function acceptLink(s: LinkSuggestion | undefined) {
+    const l = caretLine();
+    const q = linkQ;
+    linkOpen = false;
+    if (!s || !l) return;
+    const r = applyLink(l.text, l.col, q.start, linkMarkdown(s.kind, s.id, linkText(s)));
+    replaceRange(l.start, l.end, r.line, l.start + r.col);
+  }
+
+  // Keys while the link picker is open. Returns true when handled.
+  function linkKey(e: KeyboardEvent): boolean {
+    if (!linkOpen || !linkItems.length) return false;
+    const mod = e.ctrlKey || e.metaKey;
+    const n = linkItems.length;
+    if (e.key === 'ArrowDown' || (mod && e.key.toLowerCase() === 'n')) linkSel = (linkSel + 1) % n;
+    else if (e.key === 'ArrowUp' || (mod && e.key.toLowerCase() === 'p')) linkSel = (linkSel - 1 + n) % n;
+    else if (e.key === 'Enter' || e.key === 'Tab') acceptLink(linkItems[linkSel]);
+    else if (e.key === 'Escape') linkOpen = false;
+    else return false;
+    e.preventDefault();
+    e.stopPropagation();
+    return true;
+  }
+
+  // Open the note a link points at, creating it first if it's missing.
+  async function followLink(kind: string, id: string, text: string) {
+    await flushSave();
+    try {
+      if (!linkKeys.has(`${kind}/${id}`)) {
+        await api.EnsureNote(kind, id, text);
+        flash(`created ${kind}/${id}`);
+        await loadLinkTargets();
+        await refreshList();
+      }
+      await open(kind, id);
+    } catch (e) {
+      flash(errMsg(e), true);
+    }
   }
 
   // Where to put a dropdown anchored at text offset `at` in the editor.
@@ -927,7 +1045,7 @@
   // the key/value suggestions. The slash menu takes precedence.
   function updateMeta() {
     const l = caretLine();
-    const ctx = l && !slashOpen ? metaContext(l.text, l.col) : null;
+    const ctx = l && !slashOpen && !linkOpen ? metaContext(l.text, l.col) : null;
     if (!bodyEl || !ctx || !suggest(ctx, metaStats).length) {
       metaOpen = false;
       metaCtx = null;
@@ -1047,6 +1165,17 @@
   }
 
   function onPreviewClick(e: MouseEvent) {
+    const a = (e.target as HTMLElement).closest?.('a');
+    if (a) {
+      // Never let the webview navigate away from the app.
+      e.preventDefault();
+      const href = a.getAttribute('href') ?? '';
+      if (a.dataset.kind && a.dataset.id) followLink(a.dataset.kind, a.dataset.id, a.textContent ?? '');
+      else if (/^(https?:|mailto:)/i.test(href)) Browser.OpenURL(href).catch((err) => flash(errMsg(err), true));
+      else if (href.startsWith('#')) document.getElementById(decodeURIComponent(href.slice(1)))?.scrollIntoView();
+      else if (href) flash(`can't open ${href}`, true);
+      return;
+    }
     const el = e.target as HTMLElement;
     if (!(el instanceof HTMLInputElement) || !el.classList.contains('task')) return;
     e.preventDefault();
@@ -1058,6 +1187,7 @@
 
   function onBodyKey(e: KeyboardEvent) {
     if (slashKey(e)) return;
+    if (linkKey(e)) return;
     if (metaKey(e)) return;
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !e.shiftKey && !e.altKey) {
       e.preventDefault();
@@ -1084,6 +1214,7 @@
     refreshList().then(openStartPage);
     loadUserSlash();
     loadMetaStats();
+    loadLinkTargets();
     window.addEventListener('focus', onFocus);
     // Ctrl+Shift+Z is bound in main.go (Wails swallows it on Linux).
     window.addEventListener('katnotes:toggle-zoom', toggleZoom);
@@ -1324,42 +1455,34 @@
             class="editor"
             bind:this={bodyEl}
             bind:value={draftBody}
-            oninput={() => { onEdit(); updateSlash(); updateMeta(); }}
+            oninput={() => { onEdit(); updateSlash(); updateLink(); updateMeta(); }}
             onkeydown={onBodyKey}
-            onkeyup={(e) => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) { updateSlash(); updateMeta(); } }}
-            onclick={() => { updateSlash(); updateMeta(); }}
-            onblur={() => { slashOpen = false; metaOpen = false; }}
-            onscroll={() => { if (slashOpen) updateSlash(); if (metaOpen) updateMeta(); }}
+            onkeyup={(e) => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) { updateSlash(); updateLink(); updateMeta(); } }}
+            onclick={() => { updateSlash(); updateLink(); updateMeta(); }}
+            onblur={() => { slashOpen = false; metaOpen = false; linkOpen = false; }}
+            onscroll={() => { if (slashOpen) updateSlash(); if (linkOpen) updateLink(); if (metaOpen) updateMeta(); }}
             spellcheck="true"
           ></textarea>
           {#if slashOpen && slashItems.length}
-            <ul class="slash-menu" class:above={slashPos.above} style:left="{slashPos.left}px" style:top="{slashPos.top}px" role="listbox">
-              {#each slashItems as c, i (c.name)}
-                <li role="option" aria-selected={i === slashSel}>
-                  <button class="slash-item" class:active={i === slashSel} tabindex="-1"
-                    onmousedown={(e) => { e.preventDefault(); slashSel = i; acceptSlash(c); }}
-                    onmouseenter={() => (slashSel = i)}>
-                    <span class="cmd-name">/{c.name}</span>
-                    <span class="cmd-desc">{c.desc()}</span>
-                    {#if c.user}<span class="lua-badge">lua</span>{/if}
-                  </button>
-                </li>
-              {/each}
-            </ul>
+            <EditorMenu
+              items={slashItems.map((c) => ({ key: c.name, label: '/' + c.name, detail: c.desc(), badge: c.user ? 'lua' : undefined }))}
+              sel={slashSel} pos={slashPos}
+              onpick={(i) => { slashSel = i; acceptSlash(slashItems[i]); }}
+              onhover={(i) => (slashSel = i)} />
+          {/if}
+          {#if linkOpen && linkItems.length}
+            <EditorMenu wide
+              items={linkItems.map((x) => ({ key: x.kind + '/' + x.id + (x.isNew ? '+' : ''), label: x.label, detail: x.detail, muted: x.isNew }))}
+              sel={linkSel} pos={linkPos}
+              onpick={(i) => { linkSel = i; acceptLink(linkItems[i]); }}
+              onhover={(i) => (linkSel = i)} />
           {/if}
           {#if metaOpen && metaItems.length}
-            <ul class="slash-menu meta-menu" class:above={metaPos.above} style:left="{metaPos.left}px" style:top="{metaPos.top}px" role="listbox">
-              {#each metaItems as sug, i (sug.label + sug.insert)}
-                <li role="option" aria-selected={i === metaSel}>
-                  <button class="slash-item" class:active={i === metaSel} tabindex="-1"
-                    onmousedown={(e) => { e.preventDefault(); metaSel = i; acceptMeta(sug); }}
-                    onmouseenter={() => (metaSel = i)}>
-                    <span class="cmd-name">{sug.label}{sug.then ? ':' : ''}</span>
-                    <span class="cmd-desc">{sug.detail}</span>
-                  </button>
-                </li>
-              {/each}
-            </ul>
+            <EditorMenu
+              items={metaItems.map((x) => ({ key: x.label + x.insert, label: x.label + (x.then ? ':' : ''), detail: x.detail }))}
+              sel={metaSel} pos={metaPos}
+              onpick={(i) => { metaSel = i; acceptMeta(metaItems[i]); }}
+              onhover={(i) => (metaSel = i)} />
           {/if}
           </div>
         {/if}
@@ -1368,6 +1491,23 @@
           <article class="preview" onclick={onPreviewClick}>{@html preview}</article>
         {/if}
       </section>
+      {#if backlinks.length && !zoomed}
+        <details class="backlinks" open>
+          <summary>Linked from <span class="backlinks-count">{backlinks.length}</span></summary>
+          <ul>
+            {#each backlinks as b (keyOf(b.note))}
+              <li>
+                <button class="backlink-note" onclick={() => open(b.note.kind, b.note.id)}>
+                  {b.note.title}<span class="task-note-meta"> · {b.note.kind === 'journal' ? b.note.id : 'page'}</span>
+                </button>
+                {#each b.lines ?? [] as l (l.line)}
+                  <button class="backlink-line" onclick={() => openAtLine(b.note.kind, b.note.id, l.line - 1)} title="Open at this line">{plainLinks(l.text)}</button>
+                {/each}
+              </li>
+            {/each}
+          </ul>
+        </details>
+      {/if}
     {:else}
       <div class="welcome">
         <h1>KatNotes</h1>

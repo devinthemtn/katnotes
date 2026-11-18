@@ -38,6 +38,8 @@ Frontmatter keys that KatNotes doesn't know are kept when a note is saved. A fil
 ```toml
 notes_dir = "~/KatNotes"
 editor = ""                 # falls back to $VISUAL, then $EDITOR, then nano/vim/vi
+previewer = ""              # TUI "o": Markdown viewer, e.g. "katdown" or "glow -p"; empty tries katdown, glow, frogmouth, mdcat
+previewer_mode = "auto"     # auto (glow/mdcat/bat/less… use the terminal, others open a window), terminal or window
 default_kind = "page"       # what `katnotes new` makes
 journal_template = "# {{.Date}}\n\n"   # fields: .Date .ID .Weekday .Time
 date_format = "2006-01-02"  # Go time layout for journal titles
@@ -96,6 +98,22 @@ rg 'due:2026-11' ~/KatNotes        # due this month
 rg '\{[^}]*pri:high' ~/KatNotes     # high priority
 ```
 
+## Links
+
+Links between notes are ordinary relative Markdown links, so katdown, GitHub and other viewers can follow them:
+
+```markdown
+Call about [Groceries](../pages/groceries.md) — see [2026-11-17](../journal/2026-11-17.md)
+```
+
+- **GUI:** type `[[` in the editor to open a picker of pages and journal days. It also reads dates, so `[[today` or `[[fri` gives that journal day. Pick a note, or choose **New page "…"**, and the link is written for you.
+- **Preview:** click a link to open the note. Links to notes that don't exist yet are shown dashed, and clicking one creates the note.
+- **Backlinks:** a **Linked from** panel under each note (GUI) and a footer in the TUI preview list the notes that link to it. Each entry shows the linking line.
+- **Renaming** a page rewrites the links to it in every other note. Link text that matched the old title becomes the new title.
+- KatNotes writes the `../pages/<id>.md` / `../journal/<date>.md` form, which works from both folders. Any relative link that resolves to a note counts, e.g. a hand-written `other.md`. Links inside code are ignored.
+
+Find links with grep: `rg '\(\.\./pages/groceries\.md' ~/KatNotes`.
+
 ## CLI
 
 ```
@@ -106,13 +124,15 @@ katnotes today                 # open or create today's journal entry
 katnotes ls [-p|-j] [-t tag] [-s updated|title|id]
 katnotes show <id>             # also accepts: today, yesterday, or a page title
 katnotes edit <id>
-katnotes mv <id> "New title"   # pages move to the new slug
+katnotes mv <id> "New title"   # pages move to the new slug; links to them are updated
 katnotes rm <id> [-f]
 katnotes search <query> [-p|-j]
 katnotes tags
 katnotes tasks sync [-n]       # set/remove contains_task in every note (-n: dry run)
 katnotes tasks list [--overdue] [--due-before fri] [--pri high] [--where key:value] [-a]
 katnotes tasks set page/<id>:<line> due tomorrow   # set {due:…}; no value removes the key
+katnotes links <id>            # notes this note links to (marks missing ones)
+katnotes backlinks <id>        # notes that link here, with the lines
 katnotes config path|show|edit|set
 ```
 
@@ -125,6 +145,7 @@ Every command accepts `--json` for scripting.
 | `tab` / `1`–`4` | switch between Pages, Journal, Tags and Tasks |
 | `n` | new note |
 | `enter` / `e` | edit in `$EDITOR` |
+| `o` | open in the Markdown previewer (`previewer` in the config, e.g. katdown or glow) |
 | `r` | rename |
 | `d` | delete |
 | `T` | today's journal |
@@ -139,6 +160,8 @@ Every command accepts `--json` for scripting.
 | `@` | all tasks: set the due date (`2026-11-20`, `today`, `tom`, `fri`, `+3d`, `+2w`; empty clears) |
 | `p` | all tasks: cycle priority (high → med → low → none) |
 | `enter` | Tasks tab: edit the note at the task's line (vim, nano, helix, code and others) |
+| `b` | notes that link to the selected note (esc closes) |
+| `f` | notes the selected note links to; `enter` on a (missing) one creates it |
 | `?` / `F1` | help popup (shows the version; scrolls if the window is short) |
 | `q` | quit |
 
@@ -157,6 +180,7 @@ If a note is changed outside the app (by the CLI, the TUI or another editor), th
 | Ctrl+K | search |
 | Ctrl+S | save |
 | Ctrl+E | cycle edit, split and preview |
+| `[[` | link to a page or journal day (picker; saved as a Markdown link) |
 | Ctrl+Enter | make the line a task, or check/uncheck it |
 | `{` on a task line | start a `{key:value}` block: suggests `due`, `pri`, `start` and keys you've used, then values (dates like `today`, `fri`, `+3d` become `YYYY-MM-DD`) |
 | Ctrl+Space | on a task line: open those suggestions, adding the `{}` block if needed |

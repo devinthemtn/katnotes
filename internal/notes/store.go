@@ -453,16 +453,18 @@ func (s *Store) Save(n *Note) error {
 	return nil
 }
 
-// Rename changes a note's title. Pages also move to the new slug; journal ids
-// are dates and never change.
-func (s *Store) Rename(kind Kind, id, newTitle string) (*Note, error) {
+// Rename changes a note's title. Pages also move to the new slug, and links
+// to them in other notes are rewritten (link text that was the old title
+// becomes the new one); journal ids are dates and never change. The second
+// result lists the "kind/id" of each note whose links were updated.
+func (s *Store) Rename(kind Kind, id, newTitle string) (*Note, []string, error) {
 	newTitle = strings.TrimSpace(newTitle)
 	if newTitle == "" {
-		return nil, fmt.Errorf("%w: empty title", ErrInvalidID)
+		return nil, nil, fmt.Errorf("%w: empty title", ErrInvalidID)
 	}
 	n, err := s.Get(kind, id)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	oldTitle := n.Title
 	n.Title = newTitle
@@ -473,20 +475,21 @@ func (s *Store) Rename(kind Kind, id, newTitle string) (*Note, error) {
 		newID := Slugify(newTitle)
 		if newID != id {
 			if _, err := os.Stat(s.Path(kind, newID)); err == nil {
-				return nil, fmt.Errorf("%w: %s/%s", ErrExists, kind, newID)
+				return nil, nil, fmt.Errorf("%w: %s/%s", ErrExists, kind, newID)
 			}
 			old := n.Path
 			n.ID = newID
 			if err := s.Save(n); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			if err := os.Remove(old); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
-			return n, nil
+			changed, err := s.rewriteLinks(kind, id, newID, oldTitle, newTitle)
+			return n, changed, err
 		}
 	}
-	return n, s.Save(n)
+	return n, nil, s.Save(n)
 }
 
 // Delete removes a note.

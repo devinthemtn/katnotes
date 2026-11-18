@@ -1,0 +1,97 @@
+package notes
+
+import (
+	"os"
+	"strings"
+	"testing"
+)
+
+func TestParseLinks(t *testing.T) {
+	n := &Note{Kind: KindPage, Body: strings.Join([]string{
+		"see [Groceries](../pages/groceries.md) and [Day](../journal/2026-11-17.md)",
+		"same dir [Other](other.md#part) and <angle> [Sp](<../pages/sp.md> \"t\")",
+		"external [x](https://example.com) [m](mailto:a@b.c) img ![p](../pages/pic.md)",
+		"code `[no](../pages/no.md)` but [yes](../pages/yes.md)",
+		"```",
+		"[fenced](../pages/fenced.md)",
+		"```",
+		"bad [j](../journal/notadate.md) [up](../../x.md) [esc \\] br](../pages/esc.md)",
+		"[enc](../pages/caf%C3%A9.md)",
+	}, "\n")}
+	var got []string
+	for _, l := range ParseLinks(n) {
+		got = append(got, l.Text+"="+string(l.Kind)+"/"+l.ID)
+	}
+	want := "Groceries=page/groceries,Day=journal/2026-11-17,Other=page/other,Sp=page/sp,yes=page/yes,esc ] br=page/esc,enc=page/café"
+	if strings.Join(got, ",") != want {
+		t.Errorf("links =\n%s\nwant\n%s", strings.Join(got, ","), want)
+	}
+	// From a journal entry, a bare "x.md" is another journal file.
+	j := &Note{Kind: KindJournal, Body: "[y](2026-11-16.md) [p](../pages/a.md)"}
+	if ls := ParseLinks(j); len(ls) != 2 || ls[0].Kind != KindJournal || ls[1].ID != "a" {
+		t.Errorf("journal links = %+v", ls)
+	}
+	if md := LinkMarkdown(KindPage, "a-b", "A [b]"); md != `[A \[b\]](../pages/a-b.md)` {
+		t.Errorf("LinkMarkdown = %s", md)
+	}
+}
+
+func TestLinksBacklinksAndRename(t *testing.T) {
+	s := newStore(t)
+	s.Create(KindPage, "Groceries", nil, "list\n")
+	s.Create(KindPage, "Plan", nil, "buy [Groceries](../pages/groceries.md)\nalso [the list](groceries.md#top) and [Missing](../pages/missing.md)\n[Groceries](../pages/groceries.md) twice [Groceries](../pages/groceries.md)\n")
+	j, _, _ := s.Journal(fixed)
+	j.Body += "shop [Groceries](../pages/groceries.md)\n"
+	s.Save(j)
+
+	ls, err := s.Links(KindPage, "plan")
+	if err != nil || len(ls) != 5 || !ls[0].Exists || ls[2].Exists || ls[2].Title != "Missing" {
+		t.Fatalf("links = %+v %v", ls, err)
+	}
+	bl, err := s.Backlinks(KindPage, "groceries")
+	if err != nil || len(bl) != 2 {
+		t.Fatalf("backlinks = %+v %v", bl, err)
+	}
+	var plan Backlink
+	for _, b := range bl {
+		if b.Note.ID == "plan" {
+			plan = b
+		}
+	}
+	if len(plan.Lines) != 3 || plan.Lines[0].Line != 1 || plan.Lines[2].Line != 3 {
+		t.Errorf("plan lines = %+v", plan.Lines)
+	}
+
+	r, changed, err := s.Rename(KindPage, "groceries", "Shopping List")
+	if err != nil || r.ID != "shopping-list" || len(changed) != 2 {
+		t.Fatalf("rename = %v %v %v", r, changed, err)
+	}
+	p, _ := s.Get(KindPage, "plan")
+	want := "buy [Shopping List](../pages/shopping-list.md)\nalso [the list](shopping-list.md#top) and [Missing](../pages/missing.md)\n[Shopping List](../pages/shopping-list.md) twice [Shopping List](../pages/shopping-list.md)\n"
+	if p.Body != want {
+		t.Errorf("plan body =\n%q\nwant\n%q", p.Body, want)
+	}
+	if raw, _ := os.ReadFile(j.Path); !strings.Contains(string(raw), "[Shopping List](../pages/shopping-list.md)") {
+		t.Errorf("journal not rewritten: %s", raw)
+	}
+	if bl, _ := s.Backlinks(KindPage, "shopping-list"); len(bl) != 2 {
+		t.Errorf("backlinks after rename = %d", len(bl))
+	}
+}
+
+func TestEnsure(t *testing.T) {
+	s := newStore(t)
+	n, created, err := s.Ensure(KindPage, "ideas-2", "Ideas")
+	if err != nil || !created || n.ID != "ideas-2" || n.Title != "Ideas" {
+		t.Fatalf("ensure page = %+v %v %v", n, created, err)
+	}
+	if _, created, _ := s.Ensure(KindPage, "ideas-2", "Other"); created {
+		t.Error("created twice")
+	}
+	if j, created, err := s.Ensure(KindJournal, "2026-01-02", ""); err != nil || !created || j.ID != "2026-01-02" {
+		t.Errorf("ensure journal = %+v %v %v", j, created, err)
+	}
+	if _, _, err := s.Ensure(KindJournal, "nope", ""); err == nil {
+		t.Error("bad journal id accepted")
+	}
+}

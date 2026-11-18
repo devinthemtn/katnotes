@@ -203,7 +203,7 @@ func mvCmd(a *App) *cobra.Command {
 		if err != nil {
 			return err
 		}
-		r, err := a.Store.Rename(n.Kind, n.ID, strings.Join(args[1:], " "))
+		r, relinked, err := a.Store.Rename(n.Kind, n.ID, strings.Join(args[1:], " "))
 		if err != nil {
 			return err
 		}
@@ -211,6 +211,9 @@ func mvCmd(a *App) *cobra.Command {
 			return a.printJSON(r)
 		}
 		fmt.Fprintf(a.Out, "renamed %s/%s -> %s/%s\n", n.Kind, n.ID, r.Kind, r.ID)
+		if len(relinked) > 0 {
+			fmt.Fprintf(a.Out, "updated links in %d note(s): %s\n", len(relinked), strings.Join(relinked, ", "))
+		}
 		return nil
 	}
 	return cmd
@@ -528,5 +531,70 @@ func configCmd(a *App) *cobra.Command {
 			},
 		},
 	)
+	return cmd
+}
+
+func linksCmd(a *App) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "links <id>",
+		Short: "List the notes a note links to ([text](../pages/<id>.md) links)",
+		Args:  cobra.ExactArgs(1),
+	}
+	kind := kindFlags(cmd)
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		n, err := a.resolve(args[0], kind())
+		if err != nil {
+			return err
+		}
+		ls, err := a.Store.Links(n.Kind, n.ID)
+		if err != nil {
+			return err
+		}
+		if a.jsonOut {
+			return a.printJSON(ls)
+		}
+		tw := tabwriter.NewWriter(a.Out, 0, 2, 2, ' ', 0)
+		for _, l := range ls {
+			state := ""
+			if !l.Exists {
+				state = "(missing)"
+			}
+			fmt.Fprintf(tw, "%s/%s\t%s\t%s\tline %d\n", l.Kind, l.ID, l.Title, state, l.Line+1)
+		}
+		return tw.Flush()
+	}
+	return cmd
+}
+
+func backlinksCmd(a *App) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "backlinks <id>",
+		Short: "List the notes that link to a note, with the linking lines",
+		Args:  cobra.ExactArgs(1),
+	}
+	kind := kindFlags(cmd)
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		n, err := a.resolve(args[0], kind())
+		if err != nil {
+			return err
+		}
+		bl, err := a.Store.Backlinks(n.Kind, n.ID)
+		if err != nil {
+			return err
+		}
+		if a.jsonOut {
+			return a.printJSON(bl)
+		}
+		for _, b := range bl {
+			fmt.Fprintf(a.Out, "%s/%s  %s\n", b.Note.Kind, b.Note.ID, b.Note.Title)
+			for _, l := range b.Lines {
+				fmt.Fprintf(a.Out, "  %d: %s\n", l.Line, l.Text)
+			}
+		}
+		if len(bl) == 0 {
+			fmt.Fprintln(a.Out, "no notes link here")
+		}
+		return nil
+	}
 	return cmd
 }

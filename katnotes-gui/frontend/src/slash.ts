@@ -1,6 +1,6 @@
 // Slash commands typed in the editor ("/today", "/todo", …). Everything here
 // produces plain text, so notes stay ordinary Markdown.
-import { applyTodo, ensureMetaBlock } from './tasks';
+import { applyTodo, ensureMetaBlock } from './tasks.ts';
 
 export type SlashCommand = {
   name: string;

@@ -25,8 +25,15 @@ const EnvConfigDir = "KATNOTES_CONFIG_DIR"
 
 // Config holds user options.
 type Config struct {
-	NotesDir        string `toml:"notes_dir" json:"notes_dir"`
-	Editor          string `toml:"editor" json:"editor"`
+	NotesDir string `toml:"notes_dir" json:"notes_dir"`
+	Editor   string `toml:"editor" json:"editor"`
+	// Previewer is the Markdown viewer the TUI's "o" key opens the selected
+	// note in (e.g. "katdown", "glow -p"). Empty tries katdown, glow,
+	// frogmouth, then mdcat.
+	Previewer string `toml:"previewer" json:"previewer"`
+	// PreviewerMode is "auto" (terminal viewers like glow take over the
+	// terminal; anything else opens in its own window), "terminal" or "window".
+	PreviewerMode   string `toml:"previewer_mode" json:"previewer_mode"`
 	DefaultKind     string `toml:"default_kind" json:"default_kind"`
 	JournalTemplate string `toml:"journal_template" json:"journal_template"`
 	DateFormat      string `toml:"date_format" json:"date_format"`
@@ -69,6 +76,7 @@ func Default() Config {
 	return Config{
 		NotesDir:        "~/KatNotes",
 		Editor:          "",
+		PreviewerMode:   "auto",
 		DefaultKind:     "page",
 		JournalTemplate: "# {{.Date}}\n\n",
 		DateFormat:      "2006-01-02",
@@ -124,6 +132,9 @@ func Load() (Config, error) {
 	if cfg.Font.Size < MinFontSize || cfg.Font.Size > MaxFontSize {
 		cfg.Font.Size = def.Font.Size
 	}
+	if cfg.PreviewerMode == "" {
+		cfg.PreviewerMode = def.PreviewerMode
+	}
 	if cfg.StartPage == "" {
 		cfg.StartPage = def.StartPage
 	}
@@ -176,7 +187,7 @@ func ExpandHome(p string) string {
 }
 
 // Keys lists the option names accepted by Set.
-var Keys = []string{"notes_dir", "editor", "default_kind", "journal_template", "date_format", "open_with", "start_page", "frontmatter_collapsed", "task_done_date", "font.body", "font.mono", "font.size"}
+var Keys = []string{"notes_dir", "editor", "previewer", "previewer_mode", "default_kind", "journal_template", "date_format", "open_with", "start_page", "frontmatter_collapsed", "task_done_date", "font.body", "font.mono", "font.size"}
 
 // Set updates one option in the config file. It edits the file's own values,
 // not the env-overridden view returned by Load.
@@ -194,6 +205,15 @@ func Set(key, value string) error {
 		cfg.NotesDir = value
 	case "editor":
 		cfg.Editor = value
+	case "previewer":
+		cfg.Previewer = strings.TrimSpace(value)
+	case "previewer_mode":
+		switch m := strings.ToLower(strings.TrimSpace(value)); m {
+		case "auto", "terminal", "window":
+			cfg.PreviewerMode = m
+		default:
+			return fmt.Errorf("previewer_mode must be auto, terminal or window, got %q", value)
+		}
 	case "default_kind":
 		switch strings.ToLower(value) {
 		case "page", "pages", "p":
