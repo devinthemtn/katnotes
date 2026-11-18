@@ -36,6 +36,8 @@ func main() {
 		}
 	}
 
+	quietStartup()
+
 	// Without the file the app runs on the defaults, so a failure isn't fatal.
 	config.Install() //nolint:errcheck
 
