@@ -1,6 +1,6 @@
 // Autocomplete for a task's {key:value} metadata block in the editor. Pure
 // string logic: App.svelte owns the textarea and the dropdown.
-import { TASK_TEXT, normalizeDate, today } from './tasks.ts';
+import { TASK_TEXT, WEEKDAYS, normalizeDate, today } from './tasks.ts';
 
 // Mirrors notes.MetaKeyStat from the Go side.
 export type MetaStat = { key: string; count: number; values: { value: string; count: number }[] | null };
@@ -69,7 +69,6 @@ export function quoteValue(v: string): string {
   return v === '' || /[\s{}"]/.test(v) ? '"' + v.replace(/"/g, "'") + '"' : v;
 }
 
-const WEEKDAY_NAMES = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
 const SHORT_DAY = (iso: string) => {
   const [y, m, d] = iso.split('-').map(Number);
   return new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
@@ -86,7 +85,7 @@ function dateSuggestions(prefix: string, now: Date): Suggestion[] {
   };
   // What the typed text means, first (e.g. "+3d", "friday", "2026-12-01").
   if (p) add(p, normalizeDate(p, now));
-  const shortcuts = ['today', 'tomorrow', ...WEEKDAY_NAMES.map((_, i) => WEEKDAY_NAMES[(now.getDay() + 1 + i) % 7]), '+1w', '+2w'];
+  const shortcuts = ['today', 'tomorrow', ...WEEKDAYS.map((_, i) => WEEKDAYS[(now.getDay() + 1 + i) % 7]), '+1w', '+2w'];
   for (const s of shortcuts) if (!p || s.startsWith(p)) add(s, normalizeDate(s, now));
   // A partly typed ISO date: offer today's date when it still fits.
   const t = today(now);

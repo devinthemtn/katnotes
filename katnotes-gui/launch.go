@@ -11,14 +11,9 @@ import (
 	"github.com/devinthemtn/katnotes/internal/editor"
 )
 
-// start launches cmd detached from the GUI and reaps it in the background.
-func start(cmd *exec.Cmd) error {
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-	go cmd.Wait() //nolint:errcheck
-	return nil
-}
+// start launches cmd detached from the GUI (in its own session, so it
+// outlives the window) and reaps it in the background.
+func start(cmd *exec.Cmd) error { return editor.StartDetached(cmd) }
 
 // openExternal opens path with cmdline (open_with, e.g. "code -n"), just
 // as ":open-with" would, or with the system default app when it is empty.

@@ -3,14 +3,19 @@
 // typing "[[" in the editor opens a picker that writes one. Mirrors
 // internal/notes/links.go.
 import { rank } from './slash.ts';
-import { normalizeDate, today } from './tasks.ts';
+import { DATE_RE, normalizeDate, today, unescapeHTML } from './tasks.ts';
+
+// keyOf names a note as "kind/id", as the Go side does (notes.Key).
+export const keyOf = (n: { kind: string; id: string }) => `${n.kind}/${n.id}`;
+
+// plainLinks shows [text](dest) links as just their text.
+export const plainLinks = (line: string) => line.replace(/!?\[((?:\\.|[^\]\\])*)\]\([^)]*\)/g, '$1');
 
 export type NoteRef = { kind: string; id: string; title: string };
 export type LinkSuggestion = NoteRef & { label: string; detail: string; isNew?: boolean };
 
 const DIR: Record<string, string> = { page: 'pages', journal: 'journal' };
 const KIND_OF_DIR: Record<string, string> = { pages: 'page', journal: 'journal' };
-const JOURNAL_ID = /^\d{4}-\d{2}-\d{2}$/;
 const MAX = 8;
 
 // Go's Slugify: lowercase letters and digits (any script) joined by single dashes.
@@ -64,7 +69,7 @@ export function linkSuggestions(q: string, notes: NoteRef[], now = new Date()): 
     if (n.kind === 'journal' && n.id === date) continue;
     out.push({ ...n, label: n.title, detail: n.kind === 'journal' ? `journal ${n.id}` : 'page' });
   }
-  if (query && !JOURNAL_ID.test(query) && !notes.some((n) => n.title.toLowerCase() === query.toLowerCase())) {
+  if (query && !DATE_RE.test(query) && !notes.some((n) => n.title.toLowerCase() === query.toLowerCase())) {
     const id = slugify(query);
     const existing = notes.find((n) => n.kind === 'page' && n.id === id);
     if (!existing) {
@@ -105,18 +110,16 @@ export function resolveHref(href: string, from: string): { kind: string; id: str
   if (parts.length !== 2 || !parts[1].endsWith('.md')) return null;
   const kind = KIND_OF_DIR[parts[0]];
   const id = parts[1].slice(0, -3);
-  if (!kind || !id || id.startsWith('.') || (kind === 'journal' && !JOURNAL_ID.test(id))) return null;
+  if (!kind || !id || id.startsWith('.') || (kind === 'journal' && !DATE_RE.test(id))) return null;
   return { kind, id };
 }
 
-const unescapeAttr = (s: string) =>
-  s.replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
 
 // Mark links to notes in rendered HTML: class "note-link" (plus "missing"
 // when the note doesn't exist) and data-kind / data-id for the click handler.
 export function decorateLinks(html: string, from: string, exists: (kind: string, id: string) => boolean): string {
   return html.replace(/<a href="([^"]*)"/g, (m, href: string) => {
-    const t = resolveHref(unescapeAttr(href), from);
+    const t = resolveHref(unescapeHTML(href), from);
     if (!t) return m;
     const cls = exists(t.kind, t.id) ? 'note-link' : 'note-link missing';
     return `<a class="${cls}" data-kind="${t.kind}" data-id="${t.id.replace(/"/g, '&quot;')}" href="${href}"`;

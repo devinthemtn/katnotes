@@ -63,7 +63,7 @@ mono = ""                   # e.g. "JetBrains Mono"
 size = 14                   # base text size in px (8-40)
 ```
 
-To change these, run `katnotes config set <key> <value>` (use `font.size` etc. for the `[font]` table), open the file with `katnotes config edit`, or use the GUI's Settings dialog. In the GUI, `:reload` in the command palette picks up hand edits.
+To change these, run `katnotes config set <key> <value>` (use `font.size` etc. for the `[font]` table), open the file with `katnotes config edit`, or use the GUI's Settings dialog, which covers every option. In the GUI, `:reload` in the command palette picks up hand edits.
 
 ### Themes
 
@@ -76,7 +76,7 @@ accent = "#2ec4b6"
 heading = "#2ec4b6"
 ```
 
-`theme = "auto"` uses the themes named `light` and `dark`, following the system setting in the GUI and the terminal background in the TUI. Both apps use `theme` unless `tui_theme` or `gui_theme` gives one its own. `:theme <name>` sets the theme of the app you type it in (its `tui_theme` / `gui_theme`), and `:theme shared` clears that so the app follows `theme` again. You can also use `katnotes config set theme <name>` (or `tui_theme` / `gui_theme`), or the shared and GUI pickers in the GUI's Settings. The GUI re-reads theme files when its window regains focus, so edits show straight away; the TUI applies them on `:theme` or the next start. A theme file with a mistake still loads (bad values keep the built-in colour) and the app says what's wrong. The TUI uses the theme's accent, muted, border, heading and status colours, and keeps your terminal's own background and text colours.
+`theme = "auto"` uses the themes named `light` and `dark`, following the system setting in the GUI and the terminal background in the TUI. Both apps use `theme` unless `tui_theme` or `gui_theme` gives one its own. `:theme <name>` sets the theme of the app you type it in (its `tui_theme` / `gui_theme`), and `:theme shared` clears that so the app follows `theme` again. You can also use `katnotes config set theme <name>` (or `tui_theme` / `gui_theme`), or the shared, GUI and TUI pickers in the GUI's Settings. The GUI re-reads theme files when its window regains focus, so edits show straight away; the TUI applies them on `:theme` or the next start. A theme file with a mistake still loads (bad values keep the built-in colour) and the app says what's wrong. The TUI uses the theme's accent, muted, border, heading and status colours, and keeps your terminal's own background and text colours.
 
 ## Finding notes
 

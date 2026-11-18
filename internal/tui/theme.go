@@ -4,7 +4,6 @@ import (
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/devinthemtn/katnotes/internal/commands"
 	"github.com/devinthemtn/katnotes/internal/config"
 	"github.com/devinthemtn/katnotes/internal/theme"
 )
@@ -23,7 +22,7 @@ var (
 
 // loadTheme resolves the `theme` option against the terminal background.
 func loadTheme(option string) (theme.Theme, error) {
-	return theme.Resolve((&commands.Env{}).ThemesPath(), option, termDark)
+	return theme.Resolve(theme.Dir(), option, termDark)
 }
 
 // applyTheme sets every TUI style from t.

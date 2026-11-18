@@ -4,17 +4,22 @@
   import DOMPurify from 'dompurify';
   import { checkboxHTML, decorateTasks, toggleTask, makeTask, continueList, setTaskLine, setTaskMetaLine, metaChips, setStampDone, dateState, today, ensureMetaBlock } from './tasks';
   import { metaContext, suggest, applySuggestion, shouldPairBrace, type MetaContext, type MetaStat, type Suggestion } from './metacomplete';
-  import { SLASH, matchSlash, mergeSlash, slashQuery, slashToken, expandSlash, applyUserResult, caretXY, rank, type SlashCommand } from './slash';
-  import { linkQuery, linkSuggestions, linkMarkdown, linkText, applyLink, decorateLinks, type NoteRef, type LinkSuggestion } from './links';
+  import { SLASH, matchSlash, mergeSlash, slashQuery, slashToken, expandSlash, applyUserResult, caretXY, type SlashCommand } from './slash';
+  import { linkQuery, linkSuggestions, linkMarkdown, linkText, applyLink, decorateLinks, keyOf, type NoteRef, type LinkSuggestion } from './links';
   import EditorMenu from './EditorMenu.svelte';
+  import Backlinks from './components/Backlinks.svelte';
+  import NewNoteDialog from './components/NewNoteDialog.svelte';
+  import DeleteDialog from './components/DeleteDialog.svelte';
+  import FrontmatterDialog from './components/FrontmatterDialog.svelte';
+  import HelpDialog from './components/HelpDialog.svelte';
+  import SettingsDialog from './components/SettingsDialog.svelte';
   // The app icon (build/appicon.svg), shown in the help window.
-  import appIcon from '../../build/appicon.svg';
   import { Browser, Clipboard } from '@wailsio/runtime';
   import { NotesService as api } from '../bindings/github.com/devinthemtn/katnotes/katnotes-gui';
   import type { ThemeInfo } from '../bindings/github.com/devinthemtn/katnotes/katnotes-gui/models';
   import type { Note, Match, TagCount, NoteTasks, Task, Backlink } from '../bindings/github.com/devinthemtn/katnotes/internal/notes';
   import type { Config } from '../bindings/github.com/devinthemtn/katnotes/internal/config';
-  import type { State as ViewStateT, Search as SavedSearch } from '../bindings/github.com/devinthemtn/katnotes/internal/viewstate';
+  import type { State as ViewStateT } from '../bindings/github.com/devinthemtn/katnotes/internal/viewstate';
   import type { Completion as CmdCompletion, Result as CmdResult, Choice as CmdChoice, Spec as CmdSpec } from '../bindings/github.com/devinthemtn/katnotes/internal/commands';
 
   marked.use({ renderer: { checkbox: checkboxHTML } });
@@ -95,7 +100,6 @@
   let fmEditText = $state('');
   let fmEditInferred = $state(false);
   let fmEditErr = $state('');
-  let fmEditEl: HTMLTextAreaElement | undefined = $state();
 
   // editor slash menu
   // frontmatter panel above the editor
@@ -176,7 +180,6 @@
   }
 
   // A backlink line with its Markdown links shown as their text.
-  const plainLinks = (line: string) => line.replace(/!?\[((?:\\.|[^\]\\])*)\]\([^)]*\)/g, '$1');
 
   async function loadMetaStats() {
     try {
@@ -255,7 +258,6 @@
   let cfg: Config | null = $state(null);
 
   let searchEl: HTMLInputElement | undefined = $state();
-  let newEl: HTMLInputElement | undefined = $state();
   let bodyEl: HTMLTextAreaElement | undefined = $state();
 
   let saveTimer: ReturnType<typeof setTimeout> | undefined;
@@ -278,7 +280,6 @@
     if (!isErr) setTimeout(() => { if (status === msg) status = ''; }, 3000);
   }
 
-  const keyOf = (n: { kind: string; id: string }) => `${n.kind}/${n.id}`;
 
   let preview = $derived(
     DOMPurify.sanitize(
@@ -324,15 +325,19 @@
     }
   }
 
-  function setCurrent(n: Note | null) {
+  // closeMenus hides the editor's slash, {…} and [[ dropdowns.
+  function closeMenus() {
     slashOpen = false;
     metaOpen = false;
     linkOpen = false;
+  }
+
+  function setCurrent(n: Note | null) {
+    closeMenus();
     const changed = (n ? keyOf(n) : '') !== (current ? keyOf(current) : '');
     current = n;
     if (changed) backlinks = [];
     loadBacklinks();
-    if (n) savePref('lastNote', keyOf(n));
     if (n && changed) api.TouchRecent(n.kind, n.id).catch(() => {});
     conflict = false;
     dirty = false;
@@ -438,8 +443,6 @@
     newTemplate = '';
     try { templates = (await api.Templates()) ?? []; } catch { templates = []; }
     newOpen = true;
-    await tick();
-    newEl?.focus();
   }
 
   async function createNote() {
@@ -615,9 +618,7 @@
   }
 
   function setView(m: ViewMode) {
-    slashOpen = false;
-    metaOpen = false;
-    linkOpen = false;
+    closeMenus();
     viewMode = m;
     savePref('viewMode', m);
   }
@@ -685,8 +686,8 @@
       start = c.start_page || 'none';
     } catch { return; }
     if (start === 'today') return openToday();
-    // "last" is shared with the TUI (the recent file); older installs fall back to localStorage.
-    const target = start === 'last' ? ((await api.LastNote().catch(() => '')) || loadPref('lastNote', '')) : start;
+    // "last" is the newest note in the recent file the TUI shares.
+    const target = start === 'last' ? await api.LastNote().catch(() => '') : start;
     const [kind, ...rest] = target.split('/');
     const id = rest.join('/');
     if ((kind !== 'page' && kind !== 'journal') || !id) return;
@@ -702,19 +703,9 @@
     }
   }
 
-  // Settings: start page picker state.
-  let startPages: Note[] = $state([]);
-  let startMode = $derived.by(() => {
-    const v = (cfg as Config | null)?.start_page || 'none';
-    return ['none', 'last', 'today'].includes(v) ? v : 'note';
-  });
 
-  async function setStartMode(mode: string) {
-    if (mode !== 'note') return saveSetting('start_page', mode);
-    const pick = current ? keyOf(current) : startPages[0] ? keyOf(startPages[0]) : '';
-    if (!pick) { flash('no pages to choose from yet', true); return; }
-    await saveSetting('start_page', pick);
-  }
+  // Settings: notes to offer as the start page.
+  let startPages: Note[] = $state([]);
 
   async function openSettings() {
     try { startPages = (await api.List('page', '')) ?? []; } catch { startPages = []; }
@@ -732,6 +723,8 @@
       await loadInfo();
       cfg = await api.GetConfig();
       applyFonts(cfg);
+      if (key === 'frontmatter_collapsed') fmOpen = !cfg.frontmatter_collapsed;
+      if (key === 'task_done_date') setStampDone(cfg.task_done_date !== false);
       if (key.endsWith('theme')) await applyTheme();
       flash(`saved ${key}`);
     } catch (e) {
@@ -927,12 +920,6 @@
     search: (r) => applySaved({ mode: r.args?.[0] ?? 'name', text: r.args?.[1] ?? '' }),
   };
 
-  function usage(c: CmdSpec): string {
-    return [c.name, ...(c.args ?? []).map((a) => {
-      const n = a.name + (a.rest || a.many ? '…' : '');
-      return a.optional ? `[${n}]` : `<${n}>`;
-    })].join(' ');
-  }
 
   let cmdItems = $derived(cmdComp?.items ?? []);
 
@@ -1153,8 +1140,6 @@
       fmEditInferred = d.inferred;
       fmEditErr = '';
       fmEditOpen = true;
-      await tick();
-      fmEditEl?.focus();
     } catch (e) {
       flash(errMsg(e), true);
     }
@@ -1180,11 +1165,6 @@
     }
   }
 
-  function onFmEditKey(e: KeyboardEvent) {
-    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); fmEditOpen = false; bodyEl?.focus(); }
-    else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); e.stopPropagation(); saveFrontmatter(); }
-    else if (e.ctrlKey || e.metaKey) e.stopPropagation();
-  }
 
   // ---- tasks across notes ----
   function taskVisible(t: Task): boolean {
@@ -1198,12 +1178,14 @@
     return due <= today(week);
   }
   const PRI_RANK: Record<string, number> = { high: 3, med: 2, low: 1 };
-  // Due date (undated last), then priority, like Go's notes.SortTasks.
+  // Due date (undated last), then priority; taskFlat then breaks ties by the
+  // most recently updated note, path and line, all as Go's notes.SortTasks.
   function byDue(a: Task, b: Task): number {
     const da = a.meta?.due ?? '', db = b.meta?.due ?? '';
     if (da !== db) return !da ? 1 : !db ? -1 : da < db ? -1 : 1;
     return (PRI_RANK[b.meta?.pri ?? ''] ?? 0) - (PRI_RANK[a.meta?.pri ?? ''] ?? 0);
   }
+  const updatedMs = (n: Note) => Date.parse(String(n.updated ?? '')) || 0;
   function chipsOf(t: Task): string {
     const m = t.meta ?? {};
     const pairs = Object.keys(m).map((key) => ({ key, value: m[key] ?? '' }));
@@ -1237,7 +1219,8 @@
   let taskFlat = $derived(
     taskGroups
       .flatMap((g) => g.tasks.map((t) => ({ nt: g.nt, t })))
-      .sort((a, b) => byDue(a.t, b.t) || (a.nt.note.path < b.nt.note.path ? -1 : a.nt.note.path > b.nt.note.path ? 1 : a.t.line - b.t.line))
+      .sort((a, b) => byDue(a.t, b.t) || updatedMs(b.nt.note) - updatedMs(a.nt.note) ||
+        (a.nt.note.path < b.nt.note.path ? -1 : a.nt.note.path > b.nt.note.path ? 1 : a.t.line - b.t.line))
   );
   function setTaskSort(v: 'note' | 'due') {
     taskSort = v;
@@ -1254,9 +1237,7 @@
   }
 
   async function showTasks() {
-    slashOpen = false;
-    metaOpen = false;
-    linkOpen = false;
+    closeMenus();
     mainView = 'tasks';
     taskNotes = (await api.Tasks().catch(() => taskNotes)) ?? [];
   }
@@ -1705,11 +1686,10 @@
 
   onMount(() => {
     loadInfo().catch((e) => flash(errMsg(e), true));
-    refreshList().then(openStartPage);
     loadUserSlash();
     loadMetaStats();
     loadLinkTargets();
-    loadViewState().then(refreshList);
+    loadViewState().then(refreshList).then(openStartPage);
     api.Commands().then((c) => { cmdCatalog = (c ?? []).filter((x): x is CmdSpec => !!x); }).catch(() => {});
     window.addEventListener('focus', onFocus);
     applyTheme();
@@ -1738,8 +1718,8 @@
     </div>
 
     <div class="actions">
-      <button class="primary" onclick={openNew} title="Ctrl+N">+ New {tab === 'journal' ? 'entry' : 'page'}</button>
-      <button onclick={openToday} title="Ctrl+J">Today</button>
+      <button class="primary" onclick={openNew} title="{modLabel}+N">+ New {tab === 'journal' ? 'entry' : 'page'}</button>
+      <button onclick={openToday} title="{modLabel}+J">Today</button>
     </div>
 
     <div class="search-modes" role="radiogroup" aria-label="Search mode">
@@ -1752,7 +1732,7 @@
     <input
       class="search"
       type="search"
-      placeholder="Search {searchMode === 'name' ? 'names' : searchMode}…  (Ctrl+K · Tab: mode)"
+      placeholder="Search {searchMode === 'name' ? 'names' : searchMode}…  ({modLabel}+K · Tab: mode)"
       title={SEARCH_HINTS[searchMode]}
       bind:value={query}
       bind:this={searchEl}
@@ -1808,7 +1788,7 @@
             </button>
           </li>
         {:else}
-          <li class="empty">{query || tagFilter ? 'No matching notes with tasks.' : 'No tasks yet. Type /todo or press Ctrl+Enter on a line.'}</li>
+          <li class="empty">{query || tagFilter ? 'No matching notes with tasks.' : `No tasks yet. Type /todo or press ${modLabel}+Enter on a line.`}</li>
         {/each}
       {:else if tab === 'tags'}
         {#each viewState.searches ?? [] as x (x.name)}
@@ -1928,7 +1908,7 @@
             </div>
           {:else}
             <p class="empty">
-              {taskNotes.length ? `No ${taskFilter === 'all' ? '' : taskFilter + ' '}tasks${taskQuery || tagFilter || taskWhen !== 'any' ? ' match' : ''}.` : 'No tasks yet. Type /todo or press Ctrl+Enter on a line.'}
+              {taskNotes.length ? `No ${taskFilter === 'all' ? '' : taskFilter + ' '}tasks${taskQuery || tagFilter || taskWhen !== 'any' ? ' match' : ''}.` : `No tasks yet. Type /todo or press ${modLabel}+Enter on a line.`}
             </p>
           {/each}
           {/if}
@@ -1992,7 +1972,7 @@
             onkeydown={onBodyKey}
             onkeyup={(e) => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) { updateSlash(); updateLink(); updateMeta(); } }}
             onclick={() => { updateSlash(); updateLink(); updateMeta(); }}
-            onblur={() => { slashOpen = false; metaOpen = false; linkOpen = false; }}
+            onblur={closeMenus}
             onscroll={() => { if (slashOpen) updateSlash(); if (linkOpen) updateLink(); if (metaOpen) updateMeta(); }}
             spellcheck="true"
           ></textarea>
@@ -2024,22 +2004,9 @@
           <article class="preview" onclick={onPreviewClick}>{@html preview}</article>
         {/if}
       </section>
+
       {#if backlinks.length && !zoomed}
-        <details class="backlinks" open>
-          <summary>Linked from <span class="backlinks-count">{backlinks.length}</span></summary>
-          <ul>
-            {#each backlinks as b (keyOf(b.note))}
-              <li>
-                <button class="backlink-note" onclick={() => open(b.note.kind, b.note.id)}>
-                  {b.note.title}<span class="task-note-meta"> · {b.note.kind === 'journal' ? b.note.id : 'page'}</span>
-                </button>
-                {#each b.lines ?? [] as l (l.line)}
-                  <button class="backlink-line" onclick={() => openAtLine(b.note.kind, b.note.id, l.line - 1)} title="Open at this line">{plainLinks(l.text)}</button>
-                {/each}
-              </li>
-            {/each}
-          </ul>
-        </details>
+        <Backlinks {backlinks} onopen={open} onopenline={openAtLine} />
       {/if}
     {:else}
       <div class="welcome">
@@ -2050,7 +2017,7 @@
           <button onclick={openToday}>Today's journal</button>
           <button onclick={showTasks}>Tasks</button>
         </div>
-        <p class="keys">Ctrl+N new · Ctrl+J today · Ctrl+K search · Ctrl+E edit/split/preview · Ctrl+Shift+P commands · Ctrl+Shift+T tasks · ? help</p>
+        <p class="keys">{modLabel}+N new · {modLabel}+J today · {modLabel}+K search · {modLabel}+E edit/split/preview · {modLabel}+Shift+P commands · {modLabel}+Shift+T tasks · ? help</p>
       </div>
     {/if}
     {#if zoomed}
@@ -2065,44 +2032,7 @@
   </main>
 </div>
 
-{#if newOpen}
-  <div class="backdrop" role="presentation" onclick={() => (newOpen = false)}>
-    <form class="modal" onsubmit={(e) => { e.preventDefault(); createNote(); }} onclick={(e) => e.stopPropagation()} role="presentation">
-      <h2>{tab === 'journal' ? 'New journal entry' : 'New page'}</h2>
-      <input
-        bind:this={newEl}
-        bind:value={newTitle}
-        placeholder={tab === 'journal' ? 'YYYY-MM-DD (empty for today)' : 'Title'}
-      />
-      {#if tab !== 'journal' && templates.length}
-        <label class="tmpl-pick">Template
-          <select bind:value={newTemplate}>
-            <option value="">Blank page</option>
-            {#each templates as t (t)}<option value={t}>{t}</option>{/each}
-          </select>
-        </label>
-      {/if}
-      {#if tagFilter}<p class="hint">Will be tagged #{tagFilter}</p>{/if}
-      <div class="modal-actions">
-        <button type="button" onclick={() => (newOpen = false)}>Cancel</button>
-        <button type="submit" class="primary">Create</button>
-      </div>
-    </form>
-  </div>
-{/if}
 
-{#if deleteOpen && current}
-  <div class="backdrop" role="presentation" onclick={() => (deleteOpen = false)}>
-    <div class="modal" role="presentation" onclick={(e) => e.stopPropagation()}>
-      <h2>Delete “{current.title}”?</h2>
-      <p class="hint">{current.path}</p>
-      <div class="modal-actions">
-        <button onclick={() => (deleteOpen = false)}>Cancel</button>
-        <button class="danger" onclick={confirmDelete}>Delete</button>
-      </div>
-    </div>
-  </div>
-{/if}
 
 {#if cmdOpen}
   <div class="backdrop palette-backdrop" role="presentation" onclick={closePalette}>
@@ -2170,153 +2100,25 @@
   </div>
 {/if}
 
+{#if newOpen}
+  <NewNoteDialog journal={tab === 'journal'} {templates} {tagFilter} bind:title={newTitle} bind:template={newTemplate}
+    oncreate={createNote} onclose={() => (newOpen = false)} />
+{/if}
+
+{#if deleteOpen && current}
+  <DeleteDialog title={current.title} path={current.path} ondelete={confirmDelete} onclose={() => (deleteOpen = false)} />
+{/if}
+
 {#if fmEditOpen && current}
-  <div class="backdrop" role="presentation" onclick={() => (fmEditOpen = false)}>
-    <div class="modal fm-edit" role="dialog" aria-label="Edit frontmatter" tabindex="-1" onclick={(e) => e.stopPropagation()} onkeydown={onFmEditKey}>
-      <h2>Frontmatter · {current.title}</h2>
-      {#if fmEditInferred}
-        <p class="hint">This note has no frontmatter yet. These values were worked out from the file (first heading, file dates); saving adds them to it.</p>
-      {/if}
-      <textarea bind:this={fmEditEl} bind:value={fmEditText} spellcheck="false" rows="12"></textarea>
-      <p class="hint">YAML. <code>tags: [a, b]</code> · <code>created: 2026-01-31</code> · <code>updated</code> is set when you save · a new title renames the note.</p>
-      {#if fmEditErr}<div class="cmd-err">{fmEditErr}</div>{/if}
-      <div class="modal-actions">
-        <button onclick={() => (fmEditOpen = false)}>Cancel</button>
-        <button class="primary" onclick={saveFrontmatter} title="{modLabel}+Enter">Save</button>
-      </div>
-    </div>
-  </div>
+  <FrontmatterDialog noteTitle={current.title} inferred={fmEditInferred} error={fmEditErr} {modLabel} bind:text={fmEditText}
+    onsave={saveFrontmatter} onclose={() => { fmEditOpen = false; bodyEl?.focus(); }} />
 {/if}
 
 {#if helpOpen}
-  <div class="backdrop" role="presentation" onclick={() => (helpOpen = false)}>
-    <div class="modal help" role="dialog" aria-label="Keyboard help" tabindex="-1" onclick={(e) => e.stopPropagation()} onkeydown={() => {}}>
-      <header class="help-head">
-        <div class="help-brand">
-          <img class="help-icon" src={appIcon} alt="" width="44" height="44" />
-          <div>
-            <div class="help-title">Keyboard help</div>
-            <div class="help-sub">KatNotes desktop</div>
-          </div>
-        </div>
-        <span class="version-pill">katnotes-gui {version || 'dev'}</span>
-      </header>
-      <div class="help-body">
-        {#each helpSections as sec}
-          <h3>{sec.title}</h3>
-          <dl>
-            {#each sec.keys as [k, d]}
-              <dt><kbd>{k}</kbd></dt>
-              <dd>{d}</dd>
-            {/each}
-          </dl>
-        {/each}
-        <h3>Command palette</h3>
-        <dl>
-          {#each cmdCatalog as c (c.name)}
-            <dt><kbd>:{usage(c)}</kbd></dt>
-            <dd>{c.desc}{#if cmdKeys[c.name]} <span class="hint">({cmdKeys[c.name]})</span>{/if}</dd>
-          {/each}
-        </dl>
-      </div>
-      <footer class="help-foot">
-        <span class="hint">Esc or ? to close</span>
-        <button class="primary" onclick={() => (helpOpen = false)}>Close</button>
-      </footer>
-    </div>
-  </div>
+  <HelpDialog sections={helpSections} catalog={cmdCatalog} {cmdKeys} {version} onclose={() => (helpOpen = false)} />
 {/if}
 
 {#if settingsOpen && cfg}
-  <div class="backdrop" role="presentation" onclick={() => (settingsOpen = false)}>
-    <div class="modal wide" role="presentation" onclick={(e) => e.stopPropagation()}>
-      <h2>Settings</h2>
-      <label>Notes folder
-        <div class="row">
-          <input value={cfg.notes_dir} readonly />
-          <button onclick={chooseDir}>Change…</button>
-        </div>
-      </label>
-      <label>External editor (CLI/TUI)
-        <input value={cfg.editor} placeholder="$VISUAL / $EDITOR" onchange={(e) => saveSetting('editor', (e.target as HTMLInputElement).value)} />
-      </label>
-      <label>Open on launch
-        <div class="row">
-          <select value={startMode} onchange={(e) => setStartMode((e.target as HTMLSelectElement).value)}>
-            <option value="none">Welcome screen</option>
-            <option value="last">Last opened note</option>
-            <option value="today">Today's journal entry</option>
-            <option value="note">A specific note…</option>
-          </select>
-          {#if startMode === 'note'}
-            <select value={cfg.start_page} onchange={(e) => saveSetting('start_page', (e.target as HTMLSelectElement).value)}>
-              {#if current && current.kind === 'journal'}
-                <option value={keyOf(current)}>{current.title} (journal)</option>
-              {/if}
-              {#if !startPages.some((p) => keyOf(p) === cfg?.start_page) && !(current && keyOf(current) === cfg.start_page)}
-                <option value={cfg.start_page}>{cfg.start_page}</option>
-              {/if}
-              {#each startPages as p (keyOf(p))}
-                <option value={keyOf(p)}>{p.title}</option>
-              {/each}
-            </select>
-          {/if}
-        </div>
-      </label>
-      <div class="row font-row">
-        <label>Shared theme
-          <select value={cfg.theme || 'auto'} onchange={(e) => saveSetting('theme', (e.target as HTMLSelectElement).value)}>
-            <option value="auto">Auto (light or dark, following the system)</option>
-            {#each themeInfo?.names ?? ['dark', 'light'] as name (name)}
-              <option value={name}>{name}</option>
-            {/each}
-          </select>
-        </label>
-        <label>GUI theme
-          <select value={cfg.gui_theme ?? ''} onchange={(e) => saveSetting('gui_theme', (e.target as HTMLSelectElement).value)}>
-            <option value="">Same as shared ({cfg.theme || 'auto'})</option>
-            <option value="auto">Auto (light or dark, following the system)</option>
-            {#each themeInfo?.names ?? ['dark', 'light'] as name (name)}
-              <option value={name}>{name}</option>
-            {/each}
-          </select>
-        </label>
-      </div>
-      {#if themeInfo?.dir}<p class="hint">The shared theme is used by the TUI and the GUI unless one sets its own (the TUI: <code>:theme</code> or <code>tui_theme</code>). Themes are .toml files in {themeInfo.dir}; copy light.toml or dark.toml to make your own.</p>{/if}
-      <div class="row font-row">
-        <label>Body font
-          <input value={cfg.font?.body ?? ''} placeholder="system default" onchange={(e) => saveSetting('font.body', (e.target as HTMLInputElement).value)} />
-        </label>
-        <label>Mono font
-          <input value={cfg.font?.mono ?? ''} placeholder="system monospace" onchange={(e) => saveSetting('font.mono', (e.target as HTMLInputElement).value)} />
-        </label>
-        <label class="size">Size (px)
-          <input type="number" min="8" max="40" value={cfg.font?.size ?? 14} onchange={(e) => saveSetting('font.size', (e.target as HTMLInputElement).value)} />
-        </label>
-      </div>
-      <label class="check">
-        <input type="checkbox" checked={cfg.frontmatter_collapsed}
-          onchange={async (e) => { const v = (e.target as HTMLInputElement).checked; await saveSetting('frontmatter_collapsed', String(v)); fmOpen = !v; }} />
-        Start with the frontmatter table collapsed
-      </label>
-      <div class="row font-row">
-        <label>Open notes with (:external)
-          <input value={cfg.open_with} placeholder="system default (xdg-open)" onchange={(e) => saveSetting('open_with', (e.target as HTMLInputElement).value)} />
-        </label>
-        <label>…in the TUI
-          <input value={cfg.tui_open_with ?? ''} placeholder="same as open_with" onchange={(e) => saveSetting('tui_open_with', (e.target as HTMLInputElement).value)} />
-        </label>
-      </div>
-      <label>Journal title date format (Go layout)
-        <input value={cfg.date_format} onchange={(e) => saveSetting('date_format', (e.target as HTMLInputElement).value)} />
-      </label>
-      <label>Journal template
-        <textarea rows="4" value={cfg.journal_template} onchange={(e) => saveSetting('journal_template', (e.target as HTMLTextAreaElement).value)}></textarea>
-      </label>
-      <p class="hint">Config: {configPath} · katnotes-gui {version}</p>
-      <div class="modal-actions">
-        <button class="primary" onclick={() => (settingsOpen = false)}>Done</button>
-      </div>
-    </div>
-  </div>
+  <SettingsDialog {cfg} {themeInfo} {current} {startPages} {configPath} {version}
+    onsave={saveSetting} onchoosedir={chooseDir} onerror={(m) => flash(m, true)} onclose={() => (settingsOpen = false)} />
 {/if}

@@ -448,3 +448,4 @@ kbd {
 .meta-chip.pri-high { color: var(--danger); border-color: var(--danger); font-weight: 600; }
 .meta-chip.pri-med { color: var(--warning); border-color: var(--warning); }
 .meta-chip.not-started { font-style: italic; }
+.modal > form { display: contents; }

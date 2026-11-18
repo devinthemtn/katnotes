@@ -160,6 +160,12 @@ func (e *Env) TemplatesPath() string {
 	if e.TemplatesDir != "" {
 		return e.TemplatesDir
 	}
+	return TemplatesDir()
+}
+
+// TemplatesDir is the page templates folder in the config directory, or ""
+// when there is no config directory.
+func TemplatesDir() string {
 	d, err := config.Dir()
 	if err != nil {
 		return ""

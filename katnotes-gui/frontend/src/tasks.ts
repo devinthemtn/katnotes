@@ -35,7 +35,7 @@ const TASK_META_HTML = /(<input type="checkbox" class="task"[^>]*>(?:(?!<\/li>|<
 
 const escapeHTML = (s: string) =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-const unescapeHTML = (s: string) =>
+export const unescapeHTML = (s: string) =>
   s.replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
 
 // Relative state of a date value against today: 'past', 'today' or 'future'.
@@ -157,7 +157,7 @@ export function today(d = new Date()): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
-const WEEKDAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+export const WEEKDAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
 
 // Turn a typed date into YYYY-MM-DD, like Go's notes.NormalizeDate: ISO
 // dates, today, tomorrow (tom), yesterday, +Nd / +Nw, and weekday names (the

@@ -40,10 +40,10 @@ func NewNotesService() (*NotesService, error) {
 	if dir, err := commandsDir(); err == nil {
 		luacmd.WriteExample(dir) //nolint:errcheck // the example is a convenience
 	}
-	if dir := (&commands.Env{}).TemplatesPath(); dir != "" {
+	if dir := commands.TemplatesDir(); dir != "" {
 		notes.WriteExampleTemplate(dir) //nolint:errcheck // the example is a convenience
 	}
-	if dir := (&commands.Env{}).ThemesPath(); dir != "" {
+	if dir := theme.Dir(); dir != "" {
 		theme.WriteDefaults(dir) //nolint:errcheck // the files are starting points
 	}
 	return s, s.reload()
@@ -387,7 +387,7 @@ func (s *NotesService) Theme(systemDark bool) ThemeInfo {
 	s.mu.Lock()
 	option := s.cfg.ThemeFor(commands.AppGUI)
 	s.mu.Unlock()
-	dir := (&commands.Env{}).ThemesPath()
+	dir := theme.Dir()
 	t, err := theme.Resolve(dir, option, systemDark)
 	info := ThemeInfo{Theme: t, Option: option, Names: theme.List(dir), Dir: dir}
 	if err != nil {
@@ -687,12 +687,12 @@ func (s *NotesService) LastNote() string {
 
 // Templates lists the page templates in the config folder's templates/.
 func (s *NotesService) Templates() []string {
-	return notes.ListTemplates((&commands.Env{}).TemplatesPath())
+	return notes.ListTemplates(commands.TemplatesDir())
 }
 
 // CreateFromTemplate creates a page titled title from template name.
 func (s *NotesService) CreateFromTemplate(name, title string, tags []string) (*notes.Note, error) {
-	src, err := notes.ReadTemplate((&commands.Env{}).TemplatesPath(), name)
+	src, err := notes.ReadTemplate(commands.TemplatesDir(), name)
 	if err != nil {
 		return nil, err
 	}

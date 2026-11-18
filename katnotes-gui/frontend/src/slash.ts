@@ -1,6 +1,6 @@
 // Slash commands typed in the editor ("/today", "/todo", …). Everything here
 // produces plain text, so notes stay ordinary Markdown.
-import { applyTodo, ensureMetaBlock } from './tasks.ts';
+import { applyTodo, ensureMetaBlock, today } from './tasks.ts';
 
 export type SlashCommand = {
   name: string;
@@ -19,8 +19,7 @@ export type UserResult = { kind: string; text: string; line: string; cursor: num
 const pad = (n: number) => String(n).padStart(2, '0');
 
 export function isoDate(offsetDays = 0, now = new Date()): string {
-  const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + offsetDays);
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  return today(new Date(now.getFullYear(), now.getMonth(), now.getDate() + offsetDays));
 }
 
 export function timeNow(now = new Date()): string {

@@ -32,11 +32,10 @@ func Run(app *cli.App) error {
 	t, themeErr := loadTheme(app.Cfg.ThemeFor(commands.AppTUI))
 	applyTheme(t)
 	style := glamourStyle()
-	env := commands.Env{}
-	if dir := env.ThemesPath(); dir != "" {
+	if dir := theme.Dir(); dir != "" {
 		theme.WriteDefaults(dir) //nolint:errcheck // the files are starting points
 	}
-	if dir := env.TemplatesPath(); dir != "" {
+	if dir := commands.TemplatesDir(); dir != "" {
 		notes.WriteExampleTemplate(dir) //nolint:errcheck // the example is a convenience
 	}
 	m := newModel(app, style)
