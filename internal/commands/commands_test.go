@@ -193,6 +193,9 @@ func TestRunNoteActions(t *testing.T) {
 	if r := run("copy-link"); r.Clipboard != "[Renamed Target](../pages/renamed-target.md)" {
 		t.Fatalf("copy-link: %q", r.Clipboard)
 	}
+	if r := run("open-with code --wait &"); r.UI != "open-with" || !reflect.DeepEqual(r.Args, []string{"code --wait &"}) {
+		t.Fatalf("open-with: %+v", r)
+	}
 	if r := run("delete"); r.UI != "delete" || r.Changed {
 		t.Fatalf("delete should be handed to the UI: %+v", r)
 	}

@@ -47,3 +47,40 @@ func TestPreviewCommand(t *testing.T) {
 		t.Error("bad mode accepted")
 	}
 }
+
+func TestOpenWithCommand(t *testing.T) {
+	// "sh" is on every unix PATH; it stands in for an unknown program.
+	cases := []struct {
+		cmdline, want string
+		term          bool
+	}{
+		{"sh", "sh /n.md", true},
+		{"sh -x &", "sh -x /n.md", false},
+	}
+	for _, c := range cases {
+		cmd, term, err := OpenWithCommand(c.cmdline, "/n.md")
+		if err != nil {
+			t.Skip(err)
+		}
+		if got := strings.Join(cmd.Args, " "); got != c.want || term != c.term {
+			t.Errorf("%s: %q term=%v, want %q term=%v", c.cmdline, got, term, c.want, c.term)
+		}
+	}
+	if _, _, err := OpenWithCommand("  & ", "/n.md"); err == nil {
+		t.Error("empty program accepted")
+	}
+	if _, _, err := OpenWithCommand("no-such-program-katnotes", "/n.md"); err == nil {
+		t.Error("missing program accepted")
+	}
+}
+
+func TestInTerminal(t *testing.T) {
+	for prog, want := range map[string][2]bool{
+		"nvim": {true, true}, "/usr/bin/vim": {true, true}, "code": {false, true},
+		"gedit": {false, true}, "glow": {true, true}, "mystery": {false, false},
+	} {
+		if term, known := InTerminal(prog); term != want[0] || known != want[1] {
+			t.Errorf("%s: term=%v known=%v, want %v", prog, term, known, want)
+		}
+	}
+}

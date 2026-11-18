@@ -734,6 +734,28 @@ func (m *model) previewCmd(n *notes.Note) tea.Cmd {
 	return nil
 }
 
+// openWithCmd opens n once with cmdline instead of the configured editor.
+// Terminal programs take over the screen, then the note reloads as after
+// an edit; window programs start alongside the TUI.
+func (m *model) openWithCmd(n *notes.Note, cmdline string) tea.Cmd {
+	m.touchRecent(n)
+	before := m.app.Store.ModTime(n.Kind, n.ID)
+	c, inTerminal, err := editor.OpenWithCommand(cmdline, n.Path)
+	if err != nil {
+		m.setErr(fmt.Errorf("open-with: %w", err))
+		return nil
+	}
+	if inTerminal {
+		return tea.ExecProcess(c, func(err error) tea.Msg { return editedMsg{n: n, before: before, err: err} })
+	}
+	if err := editor.StartDetached(c); err != nil {
+		m.setErr(fmt.Errorf("open-with: %w", err))
+		return nil
+	}
+	m.setStatus("opened " + key(n) + " in " + editor.ProgramName(c.Args[0]))
+	return nil
+}
+
 // editCmdAt opens n in the editor at 1-based file line `line` (0 = top).
 func (m *model) editCmdAt(n *notes.Note, line int) tea.Cmd {
 	m.touchRecent(n)

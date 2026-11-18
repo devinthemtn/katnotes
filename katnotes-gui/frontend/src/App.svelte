@@ -758,6 +758,18 @@
     }
   }
 
+  async function openWith(r: CmdResult) {
+    if (!current) { flash('no note open', true); return; }
+    const prog = r.args?.[0] ?? '';
+    await flushSave();
+    try {
+      await api.OpenWith(current.kind, current.id, prog);
+      flash(`opened ${keyOf(current)} in ${prog.replace(/\s*&$/, '')}`);
+    } catch (e) {
+      flash(errMsg(e), true);
+    }
+  }
+
   async function openTerminal() {
     try {
       await api.OpenTerminal(current?.kind ?? '', current?.id ?? '');
@@ -780,6 +792,7 @@
     zoom: toggleZoom,
     external: openExternal,
     terminal: openTerminal,
+    'open-with': openWith,
     tasks: (r) => {
       for (const a of (r.args ?? []).map((x) => x.toLowerCase())) {
         if (a === 'open' || a === 'done' || a === 'all') setTaskFilter(a);

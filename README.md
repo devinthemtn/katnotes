@@ -248,6 +248,7 @@ return {
 | `unset <field>` | remove a frontmatter field |
 | `rename <title>` | rename the note and update links to it |
 | `frontmatter` | edit all of the note's frontmatter as YAML (in `$EDITOR` in the TUI, in a dialog in the GUI) |
+| `open-with <program>` | open the note once in another program, e.g. `open-with code` or `open-with nvim -R`; Tab suggests the editors you have installed. Terminal programs (vim, hx, nano, glow…) take over the TUI's screen, or get a new terminal window in the GUI; window programs (code, gedit, typora…) start alongside. In the TUI a program KatNotes doesn't know gets the terminal; end the line with `&` to start it in the background instead |
 | `copy-link` | copy a Markdown link to the note |
 | `links` / `backlinks` | notes this note links to, or that link to it |
 | `delete` | delete the note (asks first) |

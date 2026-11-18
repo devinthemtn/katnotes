@@ -37,6 +37,12 @@ var tuiActions = map[string]func(m *model, r commands.Result) tea.Cmd{
 		return nil
 	},
 	"terminal": func(m *model, _ commands.Result) tea.Cmd { return m.shellCmd() },
+	"open-with": func(m *model, r commands.Result) tea.Cmd {
+		if n := m.selected(); n != nil && len(r.Args) == 1 {
+			return m.openWithCmd(n, r.Args[0])
+		}
+		return nil
+	},
 	"reload": func(m *model, _ commands.Result) tea.Cmd {
 		m.cache = map[string]string{}
 		m.reload()

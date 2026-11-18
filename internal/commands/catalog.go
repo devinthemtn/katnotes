@@ -235,6 +235,9 @@ func init() {
 		{Name: "sync", Desc: "Git: commit all notes, then pull and push", Long: true, run: runSync},
 		{Name: "git status", Desc: "Git: notes changed since the last commit", run: runGitStatus},
 		{Name: "terminal", Desc: "Open a terminal in the note's folder", UI: true},
+		{Name: "open-with", Desc: "Open the note once in another program, e.g. open-with code (end with & to detach)", NeedsNote: true, UI: true, Args: []Arg{
+			{Name: "program", Kind: ArgText, Rest: true, complete: programs},
+		}},
 		{Name: "external", Desc: "Open the note in the system's default app", NeedsNote: true, UI: true, Apps: []string{AppGUI}},
 		{Name: "zoom", Desc: "Toggle focus mode (hide sidebar and top bar)", UI: true, Apps: []string{AppGUI}},
 		{Name: "reload", Desc: "Reload notes from disk", UI: true, Apps: []string{AppTUI}},

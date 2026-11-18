@@ -357,6 +357,22 @@ func (s *NotesService) OpenExternal(kind, id string) error {
 	return openExternal(cmdline, path)
 }
 
+// OpenWith opens a note's file once with cmdline (":open-with code").
+func (s *NotesService) OpenWith(kind, id, cmdline string) error {
+	st := s.lock()
+	k, err := notes.ParseKind(kind)
+	if err != nil {
+		s.mu.Unlock()
+		return err
+	}
+	path := st.Path(k, id)
+	s.mu.Unlock()
+	if _, err := os.Stat(path); err != nil {
+		return err
+	}
+	return openWith(cmdline, path)
+}
+
 // OpenTerminal opens a terminal in the note's folder, or the notes folder
 // when kind/id are empty.
 func (s *NotesService) OpenTerminal(kind, id string) error {

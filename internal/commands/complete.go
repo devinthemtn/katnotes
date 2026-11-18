@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/devinthemtn/katnotes/internal/editor"
 	"github.com/devinthemtn/katnotes/internal/notes"
 	"github.com/devinthemtn/katnotes/internal/recent"
 	"github.com/devinthemtn/katnotes/internal/viewstate"
@@ -370,6 +371,20 @@ func noteFields(env *Env, _ []string) []Suggestion {
 	sort.Strings(keys)
 	for _, k := range keys {
 		out = append(out, Suggestion{Value: k, Label: k, Detail: FieldText(env.Note, k)})
+	}
+	return out
+}
+
+// programs suggests the editors and viewers installed on this machine, for
+// open-with.
+func programs(_ *Env, _ []string) []Suggestion {
+	var out []Suggestion
+	for _, p := range editor.KnownPrograms() {
+		detail := "opens a window"
+		if p.InTerminal {
+			detail = "runs in a terminal"
+		}
+		out = append(out, Suggestion{Value: p.Name, Label: p.Name, Detail: detail})
 	}
 	return out
 }
