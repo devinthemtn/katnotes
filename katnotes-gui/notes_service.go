@@ -357,6 +357,25 @@ func (s *NotesService) OpenExternal(kind, id string) error {
 	return openExternal(cmdline, path)
 }
 
+// FileStamp identifies the current version of a note's file (modification
+// time and size), so the frontend can notice edits made by an external
+// editor. It is "" when the file is missing.
+func (s *NotesService) FileStamp(kind, id string) string {
+	st := s.lock()
+	k, err := notes.ParseKind(kind)
+	if err != nil {
+		s.mu.Unlock()
+		return ""
+	}
+	path := st.Path(k, id)
+	s.mu.Unlock()
+	fi, err := os.Stat(path)
+	if err != nil {
+		return ""
+	}
+	return fmt.Sprintf("%d:%d", fi.ModTime().UnixNano(), fi.Size())
+}
+
 // OpenWith opens a note's file once with cmdline (":open-with code").
 func (s *NotesService) OpenWith(kind, id, cmdline string) error {
 	st := s.lock()

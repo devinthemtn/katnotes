@@ -359,10 +359,14 @@
   async function save(force = false) {
     clearTimeout(saveTimer);
     if (!current || (!dirty && !force)) return;
+    // The file changed underneath us: only "Keep mine" may overwrite it.
+    if (conflict && !force) return;
     const target = current;
     saveState = 'saving';
     try {
       const n = await api.Save(target.kind, target.id, parseTags(draftTags), draftBody, target.updated, force);
+      // Our own write isn't an external edit.
+      if (extWatch?.key === keyOf(target)) extWatch.stamp = await api.FileStamp(target.kind, target.id);
       if (n && current && keyOf(current) === keyOf(target)) {
         current = { ...n, body: draftBody };
         dirty = false;
@@ -747,12 +751,75 @@
     zoomed = !zoomed;
   }
 
+  // After "external" or "open-with", the note's file is polled while it
+  // stays open here, so edits saved in the other program show up at once.
+  // Unsaved edits here are never overwritten: the conflict bar appears.
+  let extWatch: { key: string; stamp: string } | null = null;
+  let extTimer: ReturnType<typeof setInterval> | undefined;
+  let extChecking = false;
+  // A function, so TypeScript doesn't narrow saveState across awaits.
+  const saving = () => saveState === 'saving';
+
+  function watchExternal(n: Note, stamp: string) {
+    stopExternalWatch();
+    extWatch = { key: keyOf(n), stamp };
+    extTimer = setInterval(checkExternal, 1000);
+  }
+
+  function stopExternalWatch() {
+    clearInterval(extTimer);
+    extTimer = undefined;
+    extWatch = null;
+  }
+
+  async function checkExternal() {
+    const w = extWatch;
+    if (!w || extChecking || saving()) return;
+    if (!current || keyOf(current) !== w.key) { stopExternalWatch(); return; }
+    extChecking = true;
+    try {
+      const { kind, id } = current;
+      const stamp = await api.FileStamp(kind, id);
+      if (!stamp || stamp === w.stamp) return;
+      const fresh = await api.Get(kind, id);
+      // A save started meanwhile, or the note was switched: try next tick.
+      if (extWatch !== w || saving() || !current || keyOf(current) !== w.key) return;
+      w.stamp = stamp;
+      if (!fresh) return;
+      if (dirty) {
+        clearTimeout(saveTimer);
+        conflict = true;
+        saveState = 'error';
+        return;
+      }
+      const sel = bodyEl ? { start: bodyEl.selectionStart, end: bodyEl.selectionEnd, top: bodyEl.scrollTop, focused: document.activeElement === bodyEl } : null;
+      setCurrent(fresh);
+      await tick();
+      if (sel && bodyEl) {
+        const len = bodyEl.value.length;
+        bodyEl.setSelectionRange(Math.min(sel.start, len), Math.min(sel.end, len));
+        bodyEl.scrollTop = sel.top;
+        if (!sel.focused) bodyEl.blur();
+      }
+      flash(`reloaded ${keyOf(fresh)}: changed in the other editor`);
+      refreshList();
+      loadBacklinks();
+    } catch {
+      // The file may be mid-write; the next tick tries again.
+    } finally {
+      extChecking = false;
+    }
+  }
+
   async function openExternal() {
     if (!current) { flash('no note open', true); return; }
     await flushSave();
     try {
-      await api.OpenExternal(current.kind, current.id);
-      flash(`opened ${keyOf(current)}`);
+      const n = current;
+      const stamp = await api.FileStamp(n.kind, n.id);
+      await api.OpenExternal(n.kind, n.id);
+      watchExternal(n, stamp);
+      flash(`opened ${keyOf(n)} · watching for changes`);
     } catch (e) {
       flash(errMsg(e), true);
     }
@@ -763,8 +830,11 @@
     const prog = r.args?.[0] ?? '';
     await flushSave();
     try {
-      await api.OpenWith(current.kind, current.id, prog);
-      flash(`opened ${keyOf(current)} in ${prog.replace(/\s*&$/, '')}`);
+      const n = current;
+      const stamp = await api.FileStamp(n.kind, n.id);
+      await api.OpenWith(n.kind, n.id, prog);
+      watchExternal(n, stamp);
+      flash(`opened ${keyOf(n)} in ${prog.replace(/\s*&$/, '')} · watching for changes`);
     } catch (e) {
       flash(errMsg(e), true);
     }
@@ -1587,6 +1657,7 @@
     window.addEventListener('katnotes:toggle-zoom', toggleZoom);
     window.addEventListener('beforeunload', () => { if (dirty) save(); });
     return () => {
+      stopExternalWatch();
       window.removeEventListener('focus', onFocus);
       window.removeEventListener('katnotes:toggle-zoom', toggleZoom);
     };
