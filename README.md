@@ -16,6 +16,7 @@ Every frontend goes through the same `internal/notes` package, so they all read 
 | Lua `/` commands (GUI) | `~/.config/katnotes/commands/<name>.lua` |
 | Page templates | `~/.config/katnotes/templates/<name>.md` (an example `meeting.md` is written on first run) |
 | Command history, recent notes | `~/.config/katnotes/command_history` and `~/.config/katnotes/recent`, shared by the TUI and the GUI |
+| Sort orders, saved searches | `~/.config/katnotes/view.json`, shared by the TUI and the GUI |
 
 You can override the notes folder with `notes_dir` in the config, `$KATNOTES_DIR`, or `--dir`.
 
@@ -60,6 +61,23 @@ size = 14                   # base text size in px (8-40)
 ```
 
 To change these, run `katnotes config set <key> <value>` (use `font.size` etc. for the `[font]` table), open the file with `katnotes config edit`, or use the GUI's Settings dialog. In the GUI, `:reload` in the command palette picks up hand edits.
+
+## Finding notes
+
+Both apps have the same search with three modes. In the TUI, `/` opens a live search bar and Tab switches the mode. In the GUI, use the Name / Tags / Text buttons over the search box, or press Tab in the box.
+
+| Mode | Matches | Example |
+|---|---|---|
+| Name | fuzzy title or filename, best match first | `stdup` finds *Weekly Standup* |
+| Tags | notes with every tag listed; the last word also matches the start of a tag as you type; `-tag` excludes | `work meet`, `home -done` |
+| Text | every word and `"quoted phrase"` somewhere in the title, tags or body, showing the matching line | `budget "next week"` |
+
+- **Quick open** (`ctrl+p` in the TUI, Ctrl+P in the GUI) jumps to any note by name. Recent notes come first.
+- **Sort** each list by modified, created or title: `s` in the TUI, or the Sort menu in the GUI. Date orders add month headers, with pinned notes on top. The choice is remembered per tab.
+- **Saved searches:** `:search save <name>` keeps the current search. It appears with 🔎 at the top of the Tags tab, and `:search <name>` runs it again.
+- **Problem files:** a file whose frontmatter can't be read (often an imported one) is still listed, marked ⚠, with the whole file as its body. `:frontmatter` fixes it.
+
+Notes are cached by file time and size, so lists and searches stay quick with thousands of files. Edits made outside the apps are picked up.
 
 ## Tasks
 
@@ -132,7 +150,7 @@ katnotes show <id>             # also accepts: today, yesterday, or a page title
 katnotes edit <id>
 katnotes mv <id> "New title"   # pages move to the new slug; links to them are updated
 katnotes rm <id> [-f]
-katnotes search <query> [-p|-j]
+katnotes search <query> [-p|-j] [--name|--tags]   # full text by default; --name fuzzy, --tags all must match
 katnotes tags
 katnotes tasks sync [-n]       # set/remove contains_task in every note (-n: dry run)
 katnotes tasks list [--overdue] [--due-before fri] [--pri high] [--where key:value] [-a]
@@ -155,7 +173,9 @@ Every command accepts `--json` for scripting.
 | `r` | rename |
 | `d` | delete |
 | `T` | today's journal |
-| `/` | full-text search |
+| `/` | live search: Tab switches Name / Tags / Text, Enter keeps it, Esc clears |
+| `ctrl+p` | quick open a note by name |
+| `s` | sort Pages / Journal: modified, created, title |
 | `t` | filter by tag (`enter` on the Tags tab does the same) |
 | `esc` | clear filters |
 | `J` / `K` | scroll the preview |
@@ -185,7 +205,8 @@ If a note is changed outside the app (by the CLI, the TUI or another editor), th
 |---|---|
 | Ctrl+N | new note |
 | Ctrl+J | today's journal |
-| Ctrl+K | search |
+| Ctrl+K | search (Tab in the box switches Name / Tags / Text) |
+| Ctrl+P | quick open a note by name |
 | Ctrl+S | save |
 | Ctrl+E | cycle edit, split and preview |
 | `[[` | link to a page or journal day (picker; saved as a Markdown link) |
@@ -234,6 +255,7 @@ return {
 | `pin` / `unpin` | keep the note at the top of the list (`pinned: true` in its frontmatter; shown with 📌) |
 | `new from <template> <title>` | create a page from a template (see below) |
 | `recent` | the notes you opened lately, in either app |
+| `search save <name>` / `search <name>` / `search rm <name>` | keep the current search, run a saved one, delete one |
 | `tasks [open\|done\|all] [any\|overdue\|week]` | the all-tasks view with those filters |
 | `sync` | git: commit every change in the notes folder, then pull (rebase) and push if the branch has an upstream |
 | `git status` | git: the notes changed since the last commit |

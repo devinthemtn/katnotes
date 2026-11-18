@@ -268,14 +268,26 @@ func todayCmd(a *App) *cobra.Command {
 }
 
 func searchCmd(a *App) *cobra.Command {
+	var byName, byTags bool
 	cmd := &cobra.Command{
 		Use:   "search <query>",
-		Short: "Full-text search over titles, tags and bodies",
+		Short: "Search notes: full text (default), --name (fuzzy title/filename) or --tags (all must match)",
 		Args:  cobra.MinimumNArgs(1),
 	}
 	kind := kindFlags(cmd)
+	cmd.Flags().BoolVarP(&byName, "name", "n", false, "fuzzy match on titles and filenames")
+	cmd.Flags().BoolVar(&byTags, "tags", false, "notes with every listed tag (-tag excludes)")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
-		res, err := a.Store.Search(strings.Join(args, " "), kind())
+		mode := notes.SearchText
+		switch {
+		case byName && byTags:
+			return fmt.Errorf("use either --name or --tags")
+		case byName:
+			mode = notes.SearchName
+		case byTags:
+			mode = notes.SearchTags
+		}
+		res, err := a.Store.Find(notes.FindQuery{Mode: mode, Text: strings.Join(args, " "), Kind: kind()})
 		if err != nil {
 			return err
 		}

@@ -146,7 +146,7 @@ func (a *App) resolve(id string, kind notes.Kind) (*notes.Note, error) {
 	if kind != "" {
 		return a.Store.Get(kind, id)
 	}
-	found, err := a.Store.Find(id)
+	found, err := a.Store.FindByID(id)
 	if err != nil {
 		// Allow passing a page title instead of its slug.
 		if errors.Is(err, notes.ErrNotFound) {

@@ -17,6 +17,7 @@ import (
 	"github.com/devinthemtn/katnotes/internal/luacmd"
 	"github.com/devinthemtn/katnotes/internal/notes"
 	"github.com/devinthemtn/katnotes/internal/recent"
+	"github.com/devinthemtn/katnotes/internal/viewstate"
 )
 
 // NotesService exposes the shared notes.Store to the Svelte frontend. Every
@@ -236,6 +237,57 @@ func (s *NotesService) Search(query, kind string) ([]notes.Match, error) {
 		res = []notes.Match{}
 	}
 	return res, err
+}
+
+// Find runs a search in one of the modes "name" (fuzzy title/filename),
+// "tags" (every tag must match) or "text" (full text). An empty text lists
+// the kind's notes in sortBy order ("" for the default). Bodies are left
+// out; matching lines and title hits are included.
+func (s *NotesService) Find(mode, text, kind, tag, sortBy string) ([]notes.Match, error) {
+	st := s.lock()
+	defer s.mu.Unlock()
+	k, err := parseKind(kind)
+	if err != nil {
+		return nil, err
+	}
+	md, err := notes.ParseSearchMode(mode)
+	if err != nil {
+		return nil, err
+	}
+	sb, err := notes.ParseSort(sortBy)
+	if err != nil {
+		return nil, err
+	}
+	res, err := st.Find(notes.FindQuery{Mode: md, Text: text, Kind: k, Tag: tag, Sort: sb})
+	for i := range res {
+		res[i].Note.Body = ""
+	}
+	if res == nil {
+		res = []notes.Match{}
+	}
+	return res, err
+}
+
+// ViewState is the shared sort orders and saved searches (view.json).
+func (s *NotesService) ViewState() viewstate.State {
+	p, err := viewstate.Path()
+	if err != nil {
+		return viewstate.State{Sort: map[string]string{}, Searches: []viewstate.Search{}}
+	}
+	return viewstate.Load(p)
+}
+
+// SetSort remembers a tab's sort order (shared with the TUI).
+func (s *NotesService) SetSort(kind, sortBy string) error {
+	if _, err := notes.ParseSort(sortBy); err != nil {
+		return err
+	}
+	p, err := viewstate.Path()
+	if err != nil {
+		return err
+	}
+	_, err = viewstate.SetSort(p, kind, sortBy)
+	return err
 }
 
 // Tags lists tags with counts, most used first.
@@ -475,12 +527,14 @@ func (s *NotesService) CompleteCommand(input, kind, id string) commands.Completi
 }
 
 // RunCommand runs a command line against the open note and records it in
-// the shared history. UI commands come back with Result.UI set. Slow
+// the shared history. searchMode/searchText are the sidebar's current search
+// (for "search save"). UI commands come back with Result.UI set. Slow
 // commands (Spec.Long: git sync) run without holding the store lock, so the
 // window stays usable meanwhile.
-func (s *NotesService) RunCommand(input, kind, id string) (commands.Result, error) {
+func (s *NotesService) RunCommand(input, kind, id, searchMode, searchText string) (commands.Result, error) {
 	st := s.lock()
 	env := s.cmdEnv(st, kind, id)
+	env.Search = commands.CurrentSearch{Mode: searchMode, Text: searchText}
 	if p, err := commands.Parse(commands.AppGUI, input); err == nil && p.Spec.Long {
 		s.mu.Unlock()
 	} else {

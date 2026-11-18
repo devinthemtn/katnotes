@@ -17,10 +17,15 @@ type Match struct {
 	TitleMatch bool        `json:"titleMatch"`
 	TagMatch   bool        `json:"tagMatch"`
 	Lines      []LineMatch `json:"lines"`
+	// NameHits are the title characters (rune offsets) a name search
+	// matched, for highlighting.
+	NameHits []int `json:"nameHits,omitempty"`
+
+	rank int // name: fuzzy score; text: number of matching lines
 }
 
 func (m Match) score() int {
-	s := len(m.Lines)
+	s := m.rank
 	if m.TagMatch {
 		s += 50
 	}
@@ -32,40 +37,13 @@ func (m Match) score() int {
 
 const maxLinesPerMatch = 5
 
-// Search does a case-insensitive substring search over titles, tags and
-// bodies. An empty kind searches everything. Results are ranked with title
-// and tag hits first.
+// Search is a full-text search (Find in SearchText mode). An empty kind
+// searches everything; an empty query finds nothing.
 func (s *Store) Search(query string, kind Kind) ([]Match, error) {
-	q := strings.ToLower(strings.TrimSpace(query))
-	if q == "" {
+	if strings.TrimSpace(query) == "" {
 		return nil, nil
 	}
-	all, err := s.List(kind, ListOpts{})
-	if err != nil {
-		return nil, err
-	}
-	var out []Match
-	for _, n := range all {
-		m := Match{Note: n, Lines: []LineMatch{}}
-		m.TitleMatch = strings.Contains(strings.ToLower(n.Title), q)
-		for _, t := range n.Tags {
-			if strings.Contains(t, strings.TrimPrefix(q, "#")) {
-				m.TagMatch = true
-			}
-		}
-		for i, line := range strings.Split(n.Body, "\n") {
-			if strings.Contains(strings.ToLower(line), q) {
-				if len(m.Lines) < maxLinesPerMatch {
-					m.Lines = append(m.Lines, LineMatch{Line: i + 1, Text: strings.TrimSpace(line)})
-				}
-			}
-		}
-		if m.TitleMatch || m.TagMatch || len(m.Lines) > 0 {
-			out = append(out, m)
-		}
-	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].score() > out[j].score() })
-	return out, nil
+	return s.Find(FindQuery{Mode: SearchText, Text: query, Kind: kind})
 }
 
 // Tags returns every tag in use with the number of notes carrying it.

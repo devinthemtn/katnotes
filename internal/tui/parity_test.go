@@ -89,11 +89,14 @@ func TestListRowsPinSearchAndFrontmatter(t *testing.T) {
 	a, _ := st.Get(notes.KindPage, "alpha")
 	st.SetField(a, "pinned", "true")
 	m.reload()
-	if it := m.list.Items()[0].(noteItem); it.n.ID != "alpha" || !strings.HasPrefix(it.Title(), "📌 ") {
+	if h, ok := m.list.Items()[0].(headerItem); !ok || h.label != "Pinned" {
+		t.Fatalf("first row should be the Pinned header: %#v", m.list.Items()[0])
+	}
+	if it := m.list.Items()[1].(noteItem); it.n.ID != "alpha" || !strings.HasPrefix(it.Title(), "📌 ") {
 		t.Fatalf("pinned first: %q", it.Title())
 	}
 
-	m.query = "quick"
+	m.searchMode, m.query = notes.SearchText, "quick"
 	m.reload()
 	it := m.list.Items()[0].(noteItem)
 	if it.match != "the quick fox" || !strings.HasSuffix(it.Description(), "…the quick fox") {

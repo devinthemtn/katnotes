@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/devinthemtn/katnotes/internal/notes"
+	"github.com/devinthemtn/katnotes/internal/recent"
+	"github.com/devinthemtn/katnotes/internal/viewstate"
 )
 
 // Suggestion is one completion. Accepting it replaces Completion.Fragment
@@ -144,9 +146,14 @@ func completeArg(env *Env, input string, spec *Spec, rest []token, trailing bool
 	c.Arg = arg.Name
 	c.Keep, c.Fragment = input[:from], input[from:]
 
-	cands := candidates(env, spec, arg, prev)
 	q := strings.ToLower(strings.TrimSpace(strings.Trim(frag, `"`)))
-	for _, s := range filter(cands, q) {
+	var matched []Suggestion
+	if arg.Kind == ArgNote && arg.complete == nil {
+		matched = noteSuggestions(env, q) // fuzzy, already ranked
+	} else {
+		matched = filter(candidates(env, spec, arg, prev), q)
+	}
+	for _, s := range matched {
 		if !arg.Rest {
 			if strings.ContainsAny(s.Value, " \t") {
 				s.Value = `"` + s.Value + `"`
@@ -193,14 +200,10 @@ func candidates(env *Env, spec *Spec, arg *Arg, prev []string) []Suggestion {
 		used[strings.ToLower(strings.TrimPrefix(p, "#"))] = true
 	}
 	switch arg.Kind {
-	case ArgNote:
-		ns, err := st.List("", notes.ListOpts{})
-		if err != nil {
-			return nil
-		}
-		out := make([]Suggestion, 0, len(ns))
-		for _, n := range ns {
-			out = append(out, Suggestion{Value: n.Title, Label: n.Title, Detail: string(n.Kind) + "/" + n.ID})
+	case ArgSaved:
+		var out []Suggestion
+		for _, x := range viewstate.Load(env.viewPath()).Searches {
+			out = append(out, Suggestion{Value: x.Name, Label: x.Name, Detail: x.Mode + ": " + x.Text})
 		}
 		return out
 	case ArgTag:
@@ -376,4 +379,45 @@ func currentTitle(env *Env, _ []string) []Suggestion {
 		return nil
 	}
 	return []Suggestion{{Value: env.Note.Title, Label: env.Note.Title, Detail: "current title"}}
+}
+
+// noteSuggestions completes a note title: a fuzzy name search (title or
+// filename), or, for an empty query, the recently opened notes first and
+// then the most recently modified ones. This is also the quick-open list.
+func noteSuggestions(env *Env, q string) []Suggestion {
+	ms, err := env.Store.Find(notes.FindQuery{Mode: notes.SearchName, Text: q})
+	if err != nil {
+		return nil
+	}
+	sug := func(n *notes.Note, detail string) Suggestion {
+		return Suggestion{Value: n.Title, Label: n.Title, Detail: detail}
+	}
+	var out []Suggestion
+	if q == "" {
+		byKey := map[string]*notes.Note{}
+		for i := range ms {
+			byKey[key(&ms[i].Note)] = &ms[i].Note
+		}
+		seen := map[string]bool{}
+		for _, k := range recent.Load(env.recentPath()) {
+			if n, ok := byKey[k]; ok && !seen[k] {
+				seen[k] = true
+				out = append(out, sug(n, k+" · recent"))
+			}
+		}
+		sort.SliceStable(ms, func(i, j int) bool { return ms[i].Note.Updated.After(ms[j].Note.Updated) })
+		for i := range ms {
+			if k := key(&ms[i].Note); !seen[k] {
+				out = append(out, sug(&ms[i].Note, k))
+			}
+		}
+	} else {
+		for i := range ms {
+			out = append(out, sug(&ms[i].Note, key(&ms[i].Note)))
+		}
+	}
+	if len(out) > maxItems {
+		out = out[:maxItems]
+	}
+	return out
 }

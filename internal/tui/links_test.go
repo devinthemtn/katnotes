@@ -50,8 +50,8 @@ func TestLinksView(t *testing.T) {
 		t.Fatalf("missing item = %+v", items[1])
 	}
 	press("esc")
-	if m.links != nil || len(m.list.Items()) != 2 {
-		t.Errorf("esc did not close links view: %d items", len(m.list.Items()))
+	if m.links != nil || len(m.noteItems()) != 2 {
+		t.Errorf("esc did not close links view: %d notes", len(m.noteItems()))
 	}
 }
 

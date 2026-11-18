@@ -11,6 +11,7 @@
   import { NotesService as api } from '../bindings/github.com/devinthemtn/katnotes/katnotes-gui';
   import type { Note, Match, TagCount, NoteTasks, Task, Backlink } from '../bindings/github.com/devinthemtn/katnotes/internal/notes';
   import type { Config } from '../bindings/github.com/devinthemtn/katnotes/internal/config';
+  import type { State as ViewStateT, Search as SavedSearch } from '../bindings/github.com/devinthemtn/katnotes/internal/viewstate';
   import type { Completion as CmdCompletion, Result as CmdResult, Choice as CmdChoice, Spec as CmdSpec } from '../bindings/github.com/devinthemtn/katnotes/internal/commands';
 
   marked.use({ renderer: { checkbox: checkboxHTML } });
@@ -32,6 +33,21 @@
   let matches: Record<string, Match> = $state({});
   let tagFilter = $state('');
   let query = $state('');
+  // Search box mode (shared semantics with the TUI's "/" bar, matched in Go).
+  type SearchMode = 'name' | 'tags' | 'text';
+  const SEARCH_MODES: SearchMode[] = ['name', 'tags', 'text'];
+  const SEARCH_HINTS: Record<SearchMode, string> = {
+    name: 'fuzzy title or filename',
+    tags: 'tags, all must match (-tag excludes)',
+    text: 'words or "a phrase" in the text',
+  };
+  let searchMode = $state(loadPref('searchMode', 'name') as SearchMode);
+  // Sort per tab and saved searches, shared with the TUI (view.json).
+  let viewState: ViewStateT = $state({ sort: {}, searches: [] });
+  const SORTS: Record<string, [string, string][]> = {
+    page: [['updated', 'Modified'], ['created', 'Created'], ['title', 'Title A–Z']],
+    journal: [['id', 'Date'], ['updated', 'Modified'], ['title', 'Title A–Z']],
+  };
 
   let current: Note | null = $state(null);
   let draftBody = $state('');
@@ -102,6 +118,7 @@
     ];
     const extra = current.extra ?? {};
     for (const k of Object.keys(extra).sort()) rows.push([k, fmValue(extra[k])]);
+    if (current.problem) rows.unshift(['⚠ problem', current.problem + ' (the whole file is shown as the body; saving adds fresh frontmatter)']);
     return rows;
   });
 
@@ -207,8 +224,10 @@
       ['Tab', 'In the editor: indent two spaces'],
     ]},
     { title: 'Finding', keys: [
-      [`${modLabel}+K / ${modLabel}+F`, 'Focus search'],
-      ['Tags tab', 'Click a tag to filter Pages and Journal'],
+      [`${modLabel}+K / ${modLabel}+F`, 'Focus search; Tab in the box switches Name (fuzzy title/filename) · Tags · Text'],
+      [`${modLabel}+P`, 'Quick open: jump to any note by name (recent first)'],
+      ['Sort', 'The list’s sort menu: modified, created or title (remembered per tab, shared with the TUI)'],
+      ['Tags tab', 'Click a tag to filter Pages and Journal, or a 🔎 saved search (:search save <name>)'],
       ['clear', 'Remove the search and tag filter'],
     ]},
     { title: 'View', keys: [
@@ -281,20 +300,20 @@
         tags = (await api.Tags()) ?? [];
         return;
       }
+      const res = (await api.Find(searchMode, query, tab, tagFilter, sortFor(tab))) ?? [];
+      const m: Record<string, Match> = {};
+      const list: Note[] = [];
+      for (const r of res) {
+        if (query.trim()) m[keyOf(r.note)] = r;
+        list.push(r.note);
+      }
+      matches = m;
+      items = list;
       if (query.trim()) {
-        const res = (await api.Search(query, tab)) ?? [];
-        const m: Record<string, Match> = {};
-        const list: Note[] = [];
-        for (const r of res) {
-          if (tagFilter && !(r.note.tags ?? []).includes(tagFilter)) continue;
-          m[keyOf(r.note)] = r;
-          list.push(r.note);
-        }
-        matches = m;
-        items = list;
+        const all = (await api.Find('name', '', tab, tagFilter, '')) ?? [];
+        totalCount = all.length;
       } else {
-        matches = {};
-        items = (await api.List(tab, tagFilter)) ?? [];
+        totalCount = list.length;
       }
     } catch (e) {
       flash(errMsg(e), true);
@@ -493,6 +512,100 @@
     await refreshList();
   }
 
+  let totalCount = $state(0);
+
+  function sortFor(t: string): string {
+    return viewState.sort?.[t] || (SORTS[t]?.[0]?.[0] ?? '');
+  }
+
+  async function setSort(t: string, v: string) {
+    viewState = { ...viewState, sort: { ...(viewState.sort ?? {}), [t]: v } };
+    try { await api.SetSort(t, v); } catch (e) { flash(errMsg(e), true); }
+    await refreshList();
+  }
+
+  async function loadViewState() {
+    try { viewState = await api.ViewState(); } catch { /* keep defaults */ }
+  }
+
+  async function setSearchMode(m: SearchMode) {
+    searchMode = m;
+    savePref('searchMode', m);
+    await refreshList();
+  }
+
+  function onSearchKey(e: KeyboardEvent) {
+    if (e.key === 'Tab' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault();
+      const i = SEARCH_MODES.indexOf(searchMode);
+      setSearchMode(SEARCH_MODES[(i + (e.shiftKey ? -1 : 1) + SEARCH_MODES.length) % SEARCH_MODES.length]);
+    } else if (e.key === 'Escape' && query) {
+      e.preventDefault();
+      e.stopPropagation();
+      query = '';
+      refreshList();
+    }
+  }
+
+  async function applySaved(x: { mode: string; text: string }) {
+    searchMode = (SEARCH_MODES.includes(x.mode as SearchMode) ? x.mode : 'name') as SearchMode;
+    savePref('searchMode', searchMode);
+    query = x.text;
+    if (tab !== 'page' && tab !== 'journal') tab = 'page';
+    mainView = 'note';
+    await refreshList();
+    flash(`search ${searchMode} “${x.text}”: ${items.length} note(s)`);
+  }
+
+  // Month headers for date-sorted, unsearched lists (the TUI shows the same).
+  type Row = { header: string } | { note: Note };
+  let rows = $derived.by((): Row[] => {
+    const by = sortFor(tab);
+    if (query.trim() || by === 'title' || (tab !== 'page' && tab !== 'journal')) return items.map((n) => ({ note: n }));
+    const out: Row[] = [];
+    let last = '';
+    for (const n of items) {
+      let label = 'Pinned';
+      if (n.extra?.pinned !== true) {
+        const d = by === 'id' ? new Date(n.id + 'T00:00:00') : new Date(by === 'created' ? n.created : n.updated);
+        label = isNaN(d.getTime()) ? '' : d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+      }
+      if (label !== last) { out.push({ header: label }); last = label; }
+      out.push({ note: n });
+    }
+    return out;
+  });
+
+  // Highlighting: name hits are character offsets into the title; text hits
+  // are the search words.
+  type Seg = { t: string; on: boolean };
+  function hlChars(s: string, hits: number[] | null | undefined): Seg[] {
+    if (!hits?.length) return [{ t: s, on: false }];
+    const set = new Set(hits);
+    const out: Seg[] = [];
+    Array.from(s).forEach((ch, i) => {
+      const on = set.has(i);
+      if (out.length && out[out.length - 1].on === on) out[out.length - 1].t += ch;
+      else out.push({ t: ch, on });
+    });
+    return out;
+  }
+  function hlTerms(s: string, q: string): Seg[] {
+    const terms: string[] = [];
+    q.replace(/"([^"]+)"|(\S+)/g, (_m, p: string, w: string) => { terms.push((p ?? w).toLowerCase()); return ''; });
+    const lower = s.toLowerCase();
+    const mark = new Array(s.length).fill(false);
+    for (const t of terms.filter(Boolean)) {
+      for (let i = lower.indexOf(t); i >= 0; i = lower.indexOf(t, i + 1)) for (let j = i; j < i + t.length; j++) mark[j] = true;
+    }
+    const out: Seg[] = [];
+    for (let i = 0; i < s.length; i++) {
+      if (out.length && out[out.length - 1].on === mark[i]) out[out.length - 1].t += s[i];
+      else out.push({ t: s[i], on: mark[i] });
+    }
+    return out.length ? out : [{ t: s, on: false }];
+  }
+
   function setView(m: ViewMode) {
     slashOpen = false;
     metaOpen = false;
@@ -678,6 +791,7 @@
     help: () => { helpOpen = true; },
     delete: () => { if (current) deleteOpen = true; },
     frontmatter: openFrontmatter,
+    search: (r) => applySaved({ mode: r.args?.[0] ?? 'name', text: r.args?.[1] ?? '' }),
   };
 
   function usage(c: CmdSpec): string {
@@ -736,7 +850,17 @@
     refreshCompletion();
   }
 
+  // Quick open (Ctrl+P): the palette as a jump-to-note box, ":open " with
+  // fuzzy name matching and recent notes first; Enter takes the top match.
+  let cmdQuick = $state(false);
+  async function openQuickOpen() {
+    await openPalette();
+    cmdQuick = true;
+    await setCmdInput('open ');
+  }
+
   async function openPalette() {
+    cmdQuick = false;
     cmdPick = null;
     cmdErr = '';
     cmdHistIdx = -1;
@@ -766,7 +890,7 @@
     }
     let line = cmdInput;
     const c = cmdComp;
-    if (c && cmdItems.length && (cmdMoved || (c.phase === 'command' && !c.exact))) line = c.keep + cmdItems[cmdSel].value;
+    if (c && cmdItems.length && (cmdMoved || (c.phase === 'command' && !c.exact) || (cmdQuick && c.phase === 'arg'))) line = c.keep + cmdItems[cmdSel].value;
     line = line.trim();
     if (!line) { await closePalette(); return; }
     if (dirty && conflict) { cmdErr = 'this note has a save conflict: reload or save it first'; return; }
@@ -775,7 +899,7 @@
     if (spec?.long) { await closePalette(); flash(`${spec.name}…`); }
     let r: CmdResult;
     try {
-      r = await api.RunCommand(line, current?.kind ?? '', current?.id ?? '');
+      r = await api.RunCommand(line, current?.kind ?? '', current?.id ?? '', searchMode, query);
     } catch (e) {
       if (spec?.long) { flash(errMsg(e), true); return; }
       // Keep the palette open with the line, so it can be fixed.
@@ -788,6 +912,7 @@
   }
 
   async function applyResult(r: CmdResult) {
+    if (r.command?.startsWith('search')) await loadViewState();
     if (r.pickTitle) {
       if (r.pick?.length) {
         cmdPick = { title: r.pickTitle, items: r.pick };
@@ -1127,6 +1252,7 @@
       }
     }
     switch (e.key.toLowerCase()) {
+      case 'p': e.preventDefault(); if (cmdOpen) closePalette(); else openQuickOpen(); break;
       case 's': e.preventDefault(); save(true); break;
       case 'n': e.preventDefault(); openNew(); break;
       case 'k':
@@ -1441,6 +1567,7 @@
     loadUserSlash();
     loadMetaStats();
     loadLinkTargets();
+    loadViewState().then(refreshList);
     api.Commands().then((c) => { cmdCatalog = (c ?? []).filter((x): x is CmdSpec => !!x); }).catch(() => {});
     window.addEventListener('focus', onFocus);
     // Ctrl+Shift+Z is bound in main.go (Wails swallows it on Linux).
@@ -1469,13 +1596,22 @@
       <button onclick={openToday} title="Ctrl+J">Today</button>
     </div>
 
+    <div class="search-modes" role="radiogroup" aria-label="Search mode">
+      {#each SEARCH_MODES as md (md)}
+        <button role="radio" aria-checked={searchMode === md} class:active={searchMode === md} onclick={() => setSearchMode(md)}>
+          {md === 'name' ? 'Name' : md === 'tags' ? 'Tags' : 'Text'}
+        </button>
+      {/each}
+    </div>
     <input
       class="search"
       type="search"
-      placeholder="Search…  (Ctrl+K)"
+      placeholder="Search {searchMode === 'name' ? 'names' : searchMode}…  (Ctrl+K · Tab: mode)"
+      title={SEARCH_HINTS[searchMode]}
       bind:value={query}
       bind:this={searchEl}
       oninput={onSearchInput}
+      onkeydown={onSearchKey}
     />
 
     <nav class="tabs">
@@ -1484,11 +1620,21 @@
       <button class:active={tab === 'tags'} onclick={() => switchTab('tags')}>Tags</button>
       <button class:active={tab === 'tasks'} onclick={() => switchTab('tasks')}>Tasks</button>
     </nav>
+    {#if tab === 'page' || tab === 'journal'}
+      <div class="list-bar">
+        <span class="hint">{query.trim() ? `${items.length} of ${totalCount}` : `${items.length} note${items.length === 1 ? '' : 's'}`}</span>
+        <label class="sort-pick">Sort
+          <select value={sortFor(tab)} onchange={(e) => setSort(tab, (e.currentTarget as HTMLSelectElement).value)}>
+            {#each SORTS[tab] as [v, label] (v)}<option value={v}>{label}</option>{/each}
+          </select>
+        </label>
+      </div>
+    {/if}
 
     {#if tagFilter || query}
       <div class="filters">
         {#if tagFilter}<span class="chip">#{tagFilter}</span>{/if}
-        {#if query}<span class="chip">“{query}”</span>{/if}
+        {#if query}<span class="chip">{searchMode}: “{query}”</span>{/if}
         <button class="link" onclick={clearFilters}>clear</button>
       </div>
     {/if}
@@ -1519,6 +1665,14 @@
           <li class="empty">{query || tagFilter ? 'No matching notes with tasks.' : 'No tasks yet. Type /todo or press Ctrl+Enter on a line.'}</li>
         {/each}
       {:else if tab === 'tags'}
+        {#each viewState.searches ?? [] as x (x.name)}
+          <li>
+            <button class="item saved" onclick={() => applySaved(x)}>
+              <span class="title">🔎 {x.name}</span>
+              <span class="meta">{x.mode}: {x.text}</span>
+            </button>
+          </li>
+        {/each}
         {#each tags as t (t.tag)}
           <li>
             <button class="item" class:active={tagFilter === t.tag} onclick={() => pickTag(t.tag)}>
@@ -1530,7 +1684,11 @@
           <li class="empty">No tags yet.</li>
         {/each}
       {:else}
-        {#each items as n (keyOf(n))}
+        {#each rows as row, ri ('header' in row ? 'h:' + row.header + ri : keyOf(row.note))}
+          {#if 'header' in row}
+            <li class="group">{row.header}</li>
+          {:else}
+          {@const n = row.note}
           {@const m = matches[keyOf(n)]}
           <li>
             <button
@@ -1539,7 +1697,7 @@
               onclick={() => open(n.kind, n.id)}
             >
               <!-- Same rows as the TUI list: dates line, then tags; a search adds the hit. -->
-              <span class="title">{#if n.extra?.pinned === true}<span class="pin" title="pinned">📌</span>{/if}{n.title}</span>
+              <span class="title">{#if n.problem}<span class="warn" title={n.problem}>⚠</span>{/if}{#if n.extra?.pinned === true}<span class="pin" title="pinned">📌</span>{/if}{#each hlChars(n.title, m?.nameHits) as sg}{#if sg.on}<mark>{sg.t}</mark>{:else}{sg.t}{/if}{/each}</span>
               {#if n.kind === 'journal'}
                 <span class="meta">{n.id}{#each n.tags ?? [] as t}<span class="tag">#{t}</span>{/each}</span>
               {:else}
@@ -1547,10 +1705,11 @@
                 {#if n.tags?.length}<span class="meta">{#each n.tags as t}<span class="tag">#{t}</span>{/each}</span>{/if}
               {/if}
               {#if m && m.lines && m.lines.length}
-                <span class="snippet">…{m.lines[0].text.trim()}</span>
+                <span class="snippet">…{#each hlTerms(m.lines[0].text.trim(), searchMode === 'text' ? query : '') as sg}{#if sg.on}<mark>{sg.t}</mark>{:else}{sg.t}{/if}{/each}</span>
               {/if}
             </button>
           </li>
+          {/if}
         {:else}
           <li class="empty">
             {query ? 'No matches.' : tab === 'journal' ? 'No journal entries yet. Click Today.' : 'No pages yet.'}

@@ -333,3 +333,41 @@ func TestGitStatusPick(t *testing.T) {
 		t.Fatalf("git status: %+v %v", r, err)
 	}
 }
+
+func TestFuzzyOpenAndSavedSearches(t *testing.T) {
+	env := newEnv(t)
+	mustCreate(t, env, "Weekly Standup")
+	mustCreate(t, env, "Groceries")
+	mustCreate(t, env, "Budget")
+
+	if got := values(Complete(env, "open stdup")); !reflect.DeepEqual(got, []string{"Weekly Standup"}) {
+		t.Fatalf("fuzzy open: %v", got)
+	}
+	rp, _ := recent.Path()
+	recent.Touch(rp, "page/groceries")
+	got := Complete(env, "open ")
+	if len(got.Items) != 3 || got.Items[0].Value != "Groceries" || !strings.Contains(got.Items[0].Detail, "recent") {
+		t.Fatalf("quick open order: %+v", got.Items)
+	}
+
+	if _, err := Run(env, "search save Shopping"); err == nil {
+		t.Error("saved an empty search")
+	}
+	env.Search = CurrentSearch{Mode: "tags", Text: "home"}
+	if _, err := Run(env, "search save Shopping list"); err != nil {
+		t.Fatal(err)
+	}
+	if got := values(Complete(env, "search sho")); !reflect.DeepEqual(got, []string{"Shopping list"}) {
+		t.Fatalf("saved completion: %v", got)
+	}
+	r, err := Run(env, "search shopping list")
+	if err != nil || r.UI != "search" || !reflect.DeepEqual(r.Args, []string{"tags", "home"}) {
+		t.Fatalf("apply: %+v %v", r, err)
+	}
+	if _, err := Run(env, "search rm Shopping list"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Run(env, "search Shopping list"); err == nil {
+		t.Error("deleted search still applies")
+	}
+}

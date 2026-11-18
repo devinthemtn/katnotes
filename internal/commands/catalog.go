@@ -14,6 +14,7 @@ import (
 	"github.com/devinthemtn/katnotes/internal/config"
 	"github.com/devinthemtn/katnotes/internal/notes"
 	"github.com/devinthemtn/katnotes/internal/recent"
+	"github.com/devinthemtn/katnotes/internal/viewstate"
 )
 
 // App names, for commands that only exist in one frontend.
@@ -34,6 +35,7 @@ const (
 	ArgDate     ArgKind = "date"     // today, yesterday, tomorrow or a journal date
 	ArgTemplate ArgKind = "template" // a page template name
 	ArgChoice   ArgKind = "choice"   // one of Arg.Choices
+	ArgSaved    ArgKind = "saved"    // a saved search
 )
 
 // Arg describes one argument.
@@ -104,6 +106,24 @@ type Env struct {
 	// Files in the config directory; empty means the default location.
 	RecentPath   string // recently opened notes (internal/recent)
 	TemplatesDir string // page templates
+	ViewPath     string // sort orders and saved searches (internal/viewstate)
+
+	// Search is the app's current search, for "search save".
+	Search CurrentSearch
+}
+
+// CurrentSearch is the search an app is showing.
+type CurrentSearch struct {
+	Mode string
+	Text string
+}
+
+func (e *Env) viewPath() string {
+	if e.ViewPath != "" {
+		return e.ViewPath
+	}
+	p, _ := viewstate.Path()
+	return p
 }
 
 func (e *Env) recentPath() string {
@@ -183,6 +203,9 @@ func init() {
 			{Name: "title", Kind: ArgText, Rest: true},
 		}, run: runNewFrom},
 		{Name: "recent", Desc: "Notes you opened lately (in either app)", run: runRecent},
+		{Name: "search", Desc: "Show a saved search", Args: []Arg{{Name: "saved search", Kind: ArgSaved, Rest: true}}, run: runSearch},
+		{Name: "search save", Desc: "Save the current search under a name", Args: []Arg{{Name: "name", Kind: ArgText, Rest: true}}, run: runSearchSave},
+		{Name: "search rm", Desc: "Delete a saved search", Args: []Arg{{Name: "saved search", Kind: ArgSaved, Rest: true}}, run: runSearchRm},
 		{Name: "todo", Desc: "Add a task to today's journal, e.g. todo call Sam {due:fri}", Args: []Arg{{Name: "task", Kind: ArgText, Rest: true}}, run: runTodo},
 		{Name: "todo here", Desc: "Add a task to this note", NeedsNote: true, Args: []Arg{{Name: "task", Kind: ArgText, Rest: true}}, run: runTodoHere},
 		{Name: "journal", Desc: "Open a journal day (default today)", Args: []Arg{{Name: "date", Kind: ArgDate, Optional: true}}, run: runJournal},

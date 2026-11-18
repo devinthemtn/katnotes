@@ -70,6 +70,9 @@ type Note struct {
 	Extra   map[string]any `json:"extra,omitempty"`
 	Body    string         `json:"body"`
 	Snippet string         `json:"snippet,omitempty"`
+	// Problem says why the file's frontmatter couldn't be read. The note is
+	// still listed, with the whole file as its body, so nothing is lost.
+	Problem string `json:"problem,omitempty"`
 }
 
 // PinnedKey is the frontmatter field that pins a note to the top of lists.
@@ -104,6 +107,8 @@ type Store struct {
 	Now func() time.Time
 	// NoDoneDate stops SetTask from stamping done:<date> into task metadata.
 	NoDoneDate bool
+
+	cache noteCache
 }
 
 // New returns a store rooted at root with default settings.
@@ -161,6 +166,16 @@ func (s *Store) Get(kind Kind, id string) (*Note, error) {
 }
 
 func (s *Store) load(kind Kind, id, path string) (*Note, error) {
+	fi, err := os.Stat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("%w: %s/%s", ErrNotFound, kind, id)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if n, ok := s.cache.get(path, fi); ok {
+		return n, nil
+	}
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("%w: %s/%s", ErrNotFound, kind, id)
@@ -170,7 +185,15 @@ func (s *Store) load(kind Kind, id, path string) (*Note, error) {
 	}
 	n := &Note{Kind: kind, ID: id, Path: path}
 	if err := parseNote(data, n); err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
+		// Broken frontmatter (common in imported files): keep the note
+		// visible with the whole file as its body, and say what's wrong.
+		*n = Note{Kind: kind, ID: id, Path: path, Body: string(data), Problem: err.Error()}
+		for _, line := range strings.Split(n.Body, "\n") {
+			if l := strings.TrimSpace(line); strings.HasPrefix(l, "# ") {
+				n.Title = strings.TrimSpace(l[2:]) // first heading, past the broken block
+				break
+			}
+		}
 	}
 	if n.Title == "" {
 		n.Title = titleFromBody(n.Body)
@@ -178,20 +201,17 @@ func (s *Store) load(kind Kind, id, path string) (*Note, error) {
 	if n.Title == "" {
 		n.Title = id
 	}
-	if n.Created.IsZero() || n.Updated.IsZero() {
-		if fi, err := os.Stat(path); err == nil {
-			if n.Created.IsZero() {
-				n.Created = fi.ModTime()
-			}
-			if n.Updated.IsZero() {
-				n.Updated = fi.ModTime()
-			}
-		}
+	if n.Created.IsZero() {
+		n.Created = fi.ModTime()
+	}
+	if n.Updated.IsZero() {
+		n.Updated = fi.ModTime()
 	}
 	if n.Tags == nil {
 		n.Tags = []string{}
 	}
 	n.Snippet = snippet(n.Body)
+	s.cache.put(path, fi, n)
 	return n, nil
 }
 
@@ -229,8 +249,22 @@ type SortBy string
 const (
 	SortUpdated SortBy = "updated" // newest first (default for pages)
 	SortTitle   SortBy = "title"
-	SortID      SortBy = "id" // journal default: newest date first
+	SortID      SortBy = "id"      // journal default: newest date first
+	SortCreated SortBy = "created" // newest first
 )
+
+// ParseSort reads a sort name ("" is the kind's default).
+func ParseSort(s string) (SortBy, error) {
+	switch b := SortBy(strings.ToLower(strings.TrimSpace(s))); b {
+	case "", SortUpdated, SortTitle, SortID, SortCreated:
+		return b, nil
+	case "modified":
+		return SortUpdated, nil
+	case "date":
+		return SortID, nil
+	}
+	return "", fmt.Errorf("unknown sort %q (want updated, created, title or id)", s)
+}
 
 // ListOpts filters and orders List results.
 type ListOpts struct {
@@ -295,14 +329,16 @@ func sortNotes(ns []Note, kind Kind, by SortBy) {
 			return strings.ToLower(a.Title) < strings.ToLower(b.Title)
 		case SortID:
 			return a.ID > b.ID
+		case SortCreated:
+			return a.Created.After(b.Created)
 		default:
 			return a.Updated.After(b.Updated)
 		}
 	})
 }
 
-// Find returns every note whose ID is id, across all kinds.
-func (s *Store) Find(id string) ([]*Note, error) {
+// FindByID returns every note whose ID is id, across all kinds.
+func (s *Store) FindByID(id string) ([]*Note, error) {
 	var out []*Note
 	for _, k := range Kinds {
 		if s.check(k, id) != nil {
@@ -509,6 +545,7 @@ func (s *Store) Delete(kind Kind, id string) error {
 	if err := s.check(kind, id); err != nil {
 		return err
 	}
+	s.cache.drop(s.Path(kind, id))
 	err := os.Remove(s.Path(kind, id))
 	if errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("%w: %s/%s", ErrNotFound, kind, id)
@@ -556,5 +593,6 @@ func (s *Store) write(n *Note, exclusive bool) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
+	s.cache.drop(n.Path)
 	return os.Rename(tmp.Name(), n.Path)
 }

@@ -7,6 +7,7 @@ import (
 	"github.com/devinthemtn/katnotes/internal/gitsync"
 	"github.com/devinthemtn/katnotes/internal/notes"
 	"github.com/devinthemtn/katnotes/internal/recent"
+	"github.com/devinthemtn/katnotes/internal/viewstate"
 )
 
 func runNewFrom(env *Env, args []string) (Result, error) {
@@ -147,4 +148,32 @@ func runGitStatus(env *Env, _ []string) (Result, error) {
 		}
 	}
 	return r, nil
+}
+
+// runSearch returns a saved search for the app to show: Result.UI is
+// "search" and Args are its mode and text.
+func runSearch(env *Env, args []string) (Result, error) {
+	x, ok := viewstate.Load(env.viewPath()).FindSearch(args[0])
+	if !ok {
+		return Result{}, fmt.Errorf("no saved search %q (search save <name> keeps the current one)", args[0])
+	}
+	return Result{UI: "search", Args: []string{x.Mode, x.Text}, Status: fmt.Sprintf("search %q: %s %s", x.Name, x.Mode, x.Text)}, nil
+}
+
+func runSearchSave(env *Env, args []string) (Result, error) {
+	mode := env.Search.Mode
+	if mode == "" {
+		mode = string(notes.SearchName)
+	}
+	if _, err := viewstate.SaveSearch(env.viewPath(), viewstate.Search{Name: args[0], Mode: mode, Text: env.Search.Text}); err != nil {
+		return Result{}, err
+	}
+	return Result{Changed: true, Status: fmt.Sprintf("saved search %q (%s: %s)", args[0], mode, env.Search.Text)}, nil
+}
+
+func runSearchRm(env *Env, args []string) (Result, error) {
+	if _, err := viewstate.DeleteSearch(env.viewPath(), args[0]); err != nil {
+		return Result{}, err
+	}
+	return Result{Changed: true, Status: fmt.Sprintf("deleted saved search %q", args[0])}, nil
 }

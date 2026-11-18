@@ -22,6 +22,7 @@ import (
 	"github.com/devinthemtn/katnotes/internal/editor"
 	"github.com/devinthemtn/katnotes/internal/notes"
 	"github.com/devinthemtn/katnotes/internal/recent"
+	"github.com/devinthemtn/katnotes/internal/viewstate"
 )
 
 // Run starts the TUI.
@@ -58,6 +59,7 @@ const (
 	modeConfirm
 	modeHelp
 	modeCommand
+	modeSearch // the live "/" search bar
 )
 
 type inputPurpose int
@@ -79,10 +81,14 @@ type noteItem struct {
 }
 
 func (i noteItem) Title() string {
+	t := i.n.Title
 	if i.n.Pinned() {
-		return "📌 " + i.n.Title
+		t = "📌 " + t
 	}
-	return i.n.Title
+	if i.n.Problem != "" {
+		t = "⚠ " + t
+	}
+	return t
 }
 
 // Description is the lines under the title (the GUI sidebar shows the same):
@@ -314,23 +320,29 @@ type model struct {
 	cmdInput    textinput.Model     // the ":" command window
 	cmdSel      int                 // selected suggestion
 	cmdMoved    bool                // the selection was moved with ↑↓ since the last edit
+	cmdQuick    bool                // opened as quick open (ctrl+p): enter takes the top match
 	cmdComp     commands.Completion // completion for the current input
 	cmdHist     []string            // command history, newest first
 	cmdHistIdx  int                 // position while browsing history with ↑, or -1
 	cmdHistPath string              // shared history file ("" disables saving)
 	fmDrafts    map[string]string   // note key -> ":frontmatter" text that failed to apply
 
-	tagFilter  string
-	query      string
-	allTasks   bool                   // Tasks tab: list every task instead of notes with tasks
-	taskShow   string                 // Tasks tab, all-tasks view: "open", "done" or "all"
-	taskWhen   string                 // all-tasks view: notes.WhenAny, WhenOverdue or WhenWeek
-	pick       *pickView              // a list of notes from a command (:recent, :git status)
-	fmOpen     bool                   // preview shows the full frontmatter (F toggles)
-	recentPath string                 // shared recent-notes file ("" disables)
-	dueTask    *taskItem              // task whose due date the input prompt is editing
-	links      *linkView              // b / f: show a note's backlinks or outgoing links
-	results    map[string]notes.Match // kind/id -> match while searching
+	tagFilter   string
+	query       string
+	allTasks    bool                   // Tasks tab: list every task instead of notes with tasks
+	taskShow    string                 // Tasks tab, all-tasks view: "open", "done" or "all"
+	taskWhen    string                 // all-tasks view: notes.WhenAny, WhenOverdue or WhenWeek
+	pick        *pickView              // a list of notes from a command (:recent, :git status)
+	fmOpen      bool                   // preview shows the full frontmatter (F toggles)
+	recentPath  string                 // shared recent-notes file ("" disables)
+	dueTask     *taskItem              // task whose due date the input prompt is editing
+	links       *linkView              // b / f: show a note's backlinks or outgoing links
+	results     map[string]notes.Match // kind/id -> match while searching
+	searchMode  notes.SearchMode       // name, tags or text ("/" bar; tab cycles)
+	searchInput textinput.Model
+	total       int                         // notes on the tab before searching (for "12 of 340")
+	sorts       map[notes.Kind]notes.SortBy // per-tab order ("s"), shared via view.json
+	viewPath    string                      // view.json ("" disables saving)
 
 	status  string
 	isErr   bool
@@ -361,6 +373,17 @@ func newModel(app *cli.App, style string) model {
 		m.recentPath = p
 	}
 	m.taskShow = "open"
+	m.searchMode = notes.SearchName
+	m.searchInput = newSearchInput()
+	m.sorts = map[notes.Kind]notes.SortBy{}
+	if p, err := viewstate.Path(); err == nil {
+		m.viewPath = p
+		for k, v := range viewstate.Load(p).Sort {
+			if sb, err := notes.ParseSort(v); err == nil && sb != "" {
+				m.sorts[notes.Kind(k)] = sb
+			}
+		}
+	}
 	m.fmOpen = !app.Cfg.FrontmatterCollapsed
 	m.reload()
 	m.applyStartPage()
@@ -419,6 +442,11 @@ func (m *model) reload() {
 			}
 		}
 	case m.tab == tabTags:
+		if m.viewPath != "" {
+			for _, x := range viewstate.Load(m.viewPath).Searches {
+				items = append(items, savedItem{x})
+			}
+		}
 		var tags []notes.TagCount
 		tags, err = m.app.Store.SortedTags()
 		for _, t := range tags {
@@ -429,27 +457,24 @@ func (m *model) reload() {
 		if m.tab == tabJournal {
 			kind = notes.KindJournal
 		}
+		var res []notes.Match
+		res, err = m.app.Store.Find(notes.FindQuery{Mode: m.searchMode, Text: m.query, Kind: kind, Tag: m.tagFilter, Sort: m.sortFor(kind)})
+		m.results = map[string]notes.Match{}
+		for _, r := range res {
+			m.results[key(&r.Note)] = r
+			it := noteItem{n: r.Note}
+			if len(r.Lines) > 0 {
+				it.match = strings.TrimSpace(r.Lines[0].Text)
+			}
+			items = append(items, it)
+		}
+		m.total = len(items)
 		if m.query != "" {
-			var res []notes.Match
-			res, err = m.app.Store.Search(m.query, kind)
-			m.results = map[string]notes.Match{}
-			for _, r := range res {
-				if m.tagFilter != "" && !r.Note.HasTag(m.tagFilter) {
-					continue
-				}
-				m.results[key(&r.Note)] = r
-				it := noteItem{n: r.Note}
-				if len(r.Lines) > 0 {
-					it.match = strings.TrimSpace(r.Lines[0].Text)
-				}
-				items = append(items, it)
+			if all, lerr := m.app.Store.List(kind, notes.ListOpts{Tag: m.tagFilter}); lerr == nil {
+				m.total = len(all)
 			}
 		} else {
-			var ns []notes.Note
-			ns, err = m.app.Store.List(kind, notes.ListOpts{Tag: m.tagFilter})
-			for _, n := range ns {
-				items = append(items, noteItem{n: n})
-			}
+			items = withMonthHeaders(items, m.sortFor(kind))
 		}
 	}
 	if err != nil {
@@ -468,6 +493,7 @@ func (m *model) reload() {
 	if m.list.Index() >= len(items) && len(items) > 0 {
 		m.list.Select(len(items) - 1)
 	}
+	m.skipHeaders("down")
 	m.preview = ""
 	m.updatePreview()
 }
@@ -767,6 +793,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateHelp(msg)
 		case modeCommand:
 			return m.updateCommand(msg)
+		case modeSearch:
+			return m.updateSearch(msg)
 		}
 		return m.updateNormal(msg)
 	}
@@ -832,7 +860,17 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.startInput(inNew, "New page title: ", "")
 	case "/":
-		return m, m.startInput(inSearch, "Search: ", m.query)
+		return m, m.openSearch()
+	case "ctrl+p":
+		return m, m.openQuickOpen()
+	case "s":
+		switch m.tab {
+		case tabPages:
+			m.cycleSort(notes.KindPage)
+		case tabJournal:
+			m.cycleSort(notes.KindJournal)
+		}
+		return m, nil
 	case "t":
 		return m, m.startInput(inTag, "Filter by tag (empty clears): ", m.tagFilter)
 	case "T":
@@ -969,6 +1007,10 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, m.editCmdAt(&n, line)
 		}
+		if it, ok := m.list.SelectedItem().(savedItem); ok {
+			m.applySearch(it.s.Mode, it.s.Text)
+			return m, nil
+		}
 		if it, ok := m.list.SelectedItem().(tagItem); ok {
 			m.tagFilter = it.t.Tag
 			m.tab = tabPages
@@ -995,6 +1037,7 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	var cmd tea.Cmd
 	m.list, cmd = m.list.Update(msg)
+	m.skipHeaders(msg.String())
 	m.updatePreview()
 	return m, cmd
 }
@@ -1038,13 +1081,6 @@ func (m model) submit(val string) (tea.Model, tea.Cmd) {
 		m.reload()
 		m.selectKey(key(n))
 		return m, m.editCmd(n)
-	case inSearch:
-		m.query = val
-		if val != "" {
-			m.setStatus(fmt.Sprintf("search %q (esc clears)", val))
-		}
-		m.list.Select(0)
-		m.reload()
 	case inTag:
 		m.tagFilter = strings.ToLower(strings.TrimPrefix(val, "#"))
 		m.list.Select(0)
@@ -1133,7 +1169,7 @@ func (m model) View() string {
 		filters = append(filters, "#"+m.tagFilter)
 	}
 	if m.query != "" {
-		filters = append(filters, fmt.Sprintf("search %q", m.query))
+		filters = append(filters, fmt.Sprintf("%s %q · %d of %d", m.searchMode, m.query, len(m.noteItems()), m.total))
 	}
 	if m.pick != nil {
 		filters = append(filters, m.pick.title)
@@ -1164,6 +1200,8 @@ func (m model) View() string {
 	case modeCommand:
 		bottom = m.commandInputView()
 		body = overlayBottom(body, m.commandDropdown())
+	case modeSearch:
+		bottom = m.searchBarView()
 	case modeInput:
 		bottom = m.input.View()
 	case modeConfirm:
@@ -1234,9 +1272,11 @@ var helpSections = []struct {
 		{"p", "all-tasks view: cycle priority (high → med → low → none)"},
 	}},
 	{"Finding", []helpEntry{
-		{"/", "full-text search"},
+		{"/", "live search; tab switches Name (fuzzy title/filename) · Tags · Text"},
+		{"ctrl+p", "quick open: jump to any note by name (recent first)"},
+		{"s", "sort Pages/Journal: modified · created · title (remembered)"},
 		{"t", "filter by tag"},
-		{"enter", "on the Tags tab: filter by that tag"},
+		{"enter", "on the Tags tab: filter by that tag, or run a 🔎 saved search"},
 		{"esc", "clear search and tag filter (or close the links / :recent list)"},
 		{"o", "open the selected note in the Markdown previewer (config: previewer)"},
 		{"b", "notes that link to the selected note (backlinks)"},

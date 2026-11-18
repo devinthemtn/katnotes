@@ -51,6 +51,12 @@ var tuiActions = map[string]func(m *model, r commands.Result) tea.Cmd{
 		return nil
 	},
 	"quit": func(m *model, _ commands.Result) tea.Cmd { return tea.Quit },
+	"search": func(m *model, r commands.Result) tea.Cmd {
+		if len(r.Args) == 2 {
+			m.applySearch(r.Args[0], r.Args[1])
+		}
+		return nil
+	},
 	"links": func(m *model, _ commands.Result) tea.Cmd {
 		if n := m.selected(); n != nil {
 			m.openLinks(n, false)
@@ -83,7 +89,8 @@ func newCmdInput() textinput.Model {
 }
 
 func (m *model) cmdEnv() *commands.Env {
-	return &commands.Env{Store: m.app.Store, Note: m.selected(), App: commands.AppTUI, History: m.cmdHist}
+	return &commands.Env{Store: m.app.Store, Note: m.selected(), App: commands.AppTUI, History: m.cmdHist,
+		Search: commands.CurrentSearch{Mode: string(m.searchMode), Text: m.query}}
 }
 
 // refreshCompletion recomputes the suggestions after the input changed.
@@ -101,8 +108,19 @@ func (m *model) setCmdInput(v string) {
 func (m *model) openCommand() tea.Cmd {
 	m.mode = modeCommand
 	m.cmdHistIdx = -1
+	m.cmdQuick = false
 	m.setCmdInput("")
 	return m.cmdInput.Focus()
+}
+
+// openQuickOpen is the command window as a jump-to-note box: ":open " with
+// fuzzy title / filename matching, recent notes first. Enter opens the
+// highlighted note.
+func (m *model) openQuickOpen() tea.Cmd {
+	cmd := m.openCommand()
+	m.cmdQuick = true
+	m.setCmdInput("open ")
+	return cmd
 }
 
 func (m *model) closeCommand() {
@@ -171,7 +189,8 @@ func (m model) updateCommand(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		// Use the highlighted suggestion when the user picked one with ↑↓,
 		// or when what was typed isn't a command name yet.
-		if len(items) > 0 && (m.cmdMoved || (m.cmdComp.Phase == "command" && !m.cmdComp.Exact)) {
+		if len(items) > 0 && (m.cmdMoved || (m.cmdComp.Phase == "command" && !m.cmdComp.Exact) ||
+			(m.cmdQuick && m.cmdComp.Phase == "arg")) {
 			m.accept(m.cmdSel)
 		}
 		line := strings.TrimSpace(m.cmdInput.Value())
