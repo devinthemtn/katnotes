@@ -732,6 +732,15 @@
     version = info.version;
   }
 
+  // Whether the note on disk differs from the one shown. `updated` alone
+  // isn't enough: a note with an updated: field in its frontmatter keeps
+  // that date when another program edits it. Saving adds a final newline,
+  // so the body is compared without one.
+  function noteChanged(fresh: Note, shown: Note): boolean {
+    const view = (n: Note) => JSON.stringify([n.title, n.tags ?? [], n.extra ?? {}, n.updated, n.problem ?? '', (n.body ?? '').replace(/\n$/, '')]);
+    return view(fresh) !== view(shown);
+  }
+
   // Pick up edits made by the CLI/TUI when the window regains focus.
   async function onFocus() {
     await refreshList();
@@ -740,7 +749,7 @@
     if (current && !dirty) {
       try {
         const fresh = await api.Get(current.kind, current.id);
-        if (fresh && fresh.updated !== current.updated) setCurrent(fresh);
+        if (fresh && noteChanged(fresh, current)) setCurrent(fresh);
       } catch {
         setCurrent(null);
       }
