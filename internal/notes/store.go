@@ -73,6 +73,25 @@ type Note struct {
 	// Problem says why the file's frontmatter couldn't be read. The note is
 	// still listed, with the whole file as its body, so nothing is lost.
 	Problem string `json:"problem,omitempty"`
+	// Stamp identifies the version of the file the note was read from or
+	// written to (see FileStamp). Unlike Updated, which an updated: field
+	// in the frontmatter overrides, it changes whenever the file does.
+	Stamp string `json:"stamp,omitempty"`
+}
+
+// FileStamp identifies one version of a file: its modification time and
+// size.
+func FileStamp(fi os.FileInfo) string {
+	return fmt.Sprintf("%d:%d", fi.ModTime().UnixNano(), fi.Size())
+}
+
+// Stamp returns the FileStamp of a note's file, or "" when it is missing.
+func (s *Store) Stamp(kind Kind, id string) string {
+	fi, err := os.Stat(s.Path(kind, id))
+	if err != nil {
+		return ""
+	}
+	return FileStamp(fi)
 }
 
 // PinnedKey is the frontmatter field that pins a note to the top of lists.
@@ -211,6 +230,7 @@ func (s *Store) load(kind Kind, id, path string) (*Note, error) {
 		n.Tags = []string{}
 	}
 	n.Snippet = snippet(n.Body)
+	n.Stamp = FileStamp(fi)
 	s.cache.put(path, fi, n)
 	return n, nil
 }
@@ -594,5 +614,11 @@ func (s *Store) write(n *Note, exclusive bool) error {
 		return err
 	}
 	s.cache.drop(n.Path)
-	return os.Rename(tmp.Name(), n.Path)
+	if err := os.Rename(tmp.Name(), n.Path); err != nil {
+		return err
+	}
+	if fi, err := os.Stat(n.Path); err == nil {
+		n.Stamp = FileStamp(fi)
+	}
+	return nil
 }

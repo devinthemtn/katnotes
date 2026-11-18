@@ -364,9 +364,9 @@
     const target = current;
     saveState = 'saving';
     try {
-      const n = await api.Save(target.kind, target.id, parseTags(draftTags), draftBody, target.updated, force);
+      const n = await api.Save(target.kind, target.id, parseTags(draftTags), draftBody, target.stamp ?? '', force);
       // Our own write isn't an external edit.
-      if (extWatch?.key === keyOf(target)) extWatch.stamp = await api.FileStamp(target.kind, target.id);
+      if (n?.stamp && extWatch?.key === keyOf(target)) extWatch.stamp = n.stamp;
       if (n && current && keyOf(current) === keyOf(target)) {
         current = { ...n, body: draftBody };
         dirty = false;

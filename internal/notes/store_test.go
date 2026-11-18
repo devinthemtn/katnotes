@@ -381,3 +381,44 @@ func TestSyncTaskFlags(t *testing.T) {
 		t.Errorf("second sync = %+v", again)
 	}
 }
+
+// An edit by another program that leaves the updated: field alone still
+// changes the stamp, so the GUI can see it.
+func TestStampTracksFileNotUpdated(t *testing.T) {
+	s := newStore(t)
+	n, err := s.Create(KindPage, "Stamped", nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n.Stamp == "" || n.Stamp != s.Stamp(KindPage, n.ID) {
+		t.Fatalf("create stamp %q, file %q", n.Stamp, s.Stamp(KindPage, n.ID))
+	}
+	body := "---\ntitle: Stamped\nupdated: 2026-01-02T03:04:05Z\n---\nfirst\n"
+	if err := os.WriteFile(n.Path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a, err := s.Get(KindPage, n.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(n.Path, []byte(strings.Replace(body, "first", "second, longer", 1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	b, err := s.Get(KindPage, n.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !a.Updated.Equal(b.Updated) {
+		t.Fatalf("updated: field should pin Updated: %v vs %v", a.Updated, b.Updated)
+	}
+	if a.Stamp == b.Stamp {
+		t.Fatalf("stamp unchanged after an outside edit: %q", a.Stamp)
+	}
+	b.Body = "third\n"
+	if err := s.Save(b); err != nil {
+		t.Fatal(err)
+	}
+	if b.Stamp == a.Stamp || b.Stamp != s.Stamp(KindPage, n.ID) {
+		t.Fatalf("save stamp %q, file %q", b.Stamp, s.Stamp(KindPage, n.ID))
+	}
+}

@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 
@@ -126,10 +125,11 @@ func (s *NotesService) Create(kind, title string, tags []string) (*notes.Note, e
 // the frontend loaded it.
 var ErrConflict = errors.New("this note was changed outside the app; reload it before saving")
 
-// Save writes tags and body. baseUpdated is the note's `updated` value as the
-// frontend last saw it; if the file has moved on since, ErrConflict is
-// returned unless force is set.
-func (s *NotesService) Save(kind, id string, tags []string, body, baseUpdated string, force bool) (*notes.Note, error) {
+// Save writes tags and body. baseStamp is the note's Stamp as the frontend
+// last saw it; if the file has changed since, ErrConflict is returned unless
+// force is set. (The stamp, not `updated`, because an updated: field in the
+// frontmatter stays put when another program edits the file.)
+func (s *NotesService) Save(kind, id string, tags []string, body, baseStamp string, force bool) (*notes.Note, error) {
 	st := s.lock()
 	defer s.mu.Unlock()
 	k, err := notes.ParseKind(kind)
@@ -140,10 +140,8 @@ func (s *NotesService) Save(kind, id string, tags []string, body, baseUpdated st
 	if err != nil {
 		return nil, err
 	}
-	if !force && baseUpdated != "" {
-		if base, err := time.Parse(time.RFC3339Nano, baseUpdated); err == nil && !n.Updated.Equal(base) {
-			return nil, ErrConflict
-		}
+	if !force && baseStamp != "" && n.Stamp != baseStamp {
+		return nil, ErrConflict
 	}
 	n.Tags = tags
 	n.Body = body
@@ -357,23 +355,17 @@ func (s *NotesService) OpenExternal(kind, id string) error {
 	return openExternal(cmdline, path)
 }
 
-// FileStamp identifies the current version of a note's file (modification
-// time and size), so the frontend can notice edits made by an external
-// editor. It is "" when the file is missing.
+// FileStamp identifies the current version of a note's file (its Stamp),
+// so the frontend can notice edits made by an external editor. It is ""
+// when the file is missing.
 func (s *NotesService) FileStamp(kind, id string) string {
 	st := s.lock()
+	defer s.mu.Unlock()
 	k, err := notes.ParseKind(kind)
 	if err != nil {
-		s.mu.Unlock()
 		return ""
 	}
-	path := st.Path(k, id)
-	s.mu.Unlock()
-	fi, err := os.Stat(path)
-	if err != nil {
-		return ""
-	}
-	return fmt.Sprintf("%d:%d", fi.ModTime().UnixNano(), fi.Size())
+	return st.Stamp(k, id)
 }
 
 // OpenWith opens a note's file once with cmdline (":open-with code").

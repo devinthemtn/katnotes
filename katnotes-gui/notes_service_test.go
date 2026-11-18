@@ -3,8 +3,8 @@ package main
 import (
 	"errors"
 	"os"
+	"strings"
 	"testing"
-	"time"
 
 	"github.com/devinthemtn/katnotes/internal/config"
 )
@@ -31,21 +31,28 @@ func TestServiceFlow(t *testing.T) {
 		t.Fatalf("list: %+v", list)
 	}
 
-	base := n.Updated.Format(time.RFC3339Nano)
-	saved, err := s.Save("page", n.ID, []string{"gui", "x"}, "# GUI Note\n\nhello\n", base, false)
+	saved, err := s.Save("page", n.ID, []string{"gui", "x"}, "# GUI Note\n\nhello\n", n.Stamp, false)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if saved.Stamp == "" || saved.Stamp == n.Stamp {
+		t.Fatalf("save didn't refresh the stamp: %q -> %q", n.Stamp, saved.Stamp)
+	}
 
-	// Simulate the CLI/TUI editing the file in between: stale base -> conflict.
-	time.Sleep(1100 * time.Millisecond) // updated has 1s resolution
-	if _, err := s.Save("page", n.ID, nil, "from cli\n", saved.Updated.Format(time.RFC3339Nano), false); err != nil {
+	// Another program edits the file in between, keeping its updated:
+	// field as it was: the stale stamp must still conflict.
+	before, _ := os.ReadFile(saved.Path)
+	edited := strings.Replace(string(before), "hello", "edited elsewhere", 1)
+	if edited == string(before) {
+		t.Fatalf("unexpected file: %s", before)
+	}
+	if err := os.WriteFile(saved.Path, []byte(edited), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Save("page", n.ID, nil, "stale gui\n", saved.Updated.Format(time.RFC3339Nano), false); !errors.Is(err, ErrConflict) {
+	if _, err := s.Save("page", n.ID, nil, "stale gui\n", saved.Stamp, false); !errors.Is(err, ErrConflict) {
 		t.Fatalf("want ErrConflict, got %v", err)
 	}
-	if _, err := s.Save("page", n.ID, nil, "forced\n", saved.Updated.Format(time.RFC3339Nano), true); err != nil {
+	if _, err := s.Save("page", n.ID, nil, "forced\n", saved.Stamp, true); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := s.Get("page", n.ID)
