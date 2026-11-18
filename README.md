@@ -161,13 +161,24 @@ katnotes new --template meeting "Standup"   # new page from ~/.config/katnotes/t
 katnotes todo call Sam {due:fri}            # add a task to today's journal (--here <id> for another note)
 katnotes sync                  # git: commit the notes folder, then pull --rebase and push
 katnotes today                 # open or create today's journal entry
+katnotes journal [day]         # a journal day: tomorrow, -3, +1, 2026-11-20 (--no-edit)
 katnotes ls [-p|-j] [-t tag] [-s updated|title|id]
-katnotes show <id>             # also accepts: today, yesterday, or a page title
+katnotes show <id>             # also accepts: today, yesterday, page/<id>, or a (unique part of a) title
 katnotes edit <id>
 katnotes mv <id> "New title"   # pages move to the new slug; links to them are updated
 katnotes rm <id> [-f]
 katnotes search <query> [-p|-j] [--name|--tags]   # full text by default; --name fuzzy, --tags all must match
+katnotes search <query> --save <name>              # also keep it as a saved search (TUI and GUI see it too)
+katnotes search --saved <name>                     # run a saved search
+katnotes saved [rm <name>]     # list or delete saved searches
 katnotes tags
+katnotes tag add|rm <id> <tag…>
+katnotes set <id> <field> <value>   # frontmatter, as :set; unset <id> <field> removes one
+katnotes pin|unpin <id>
+katnotes link <id>             # print a Markdown link to the note
+katnotes recent                # notes opened lately in the TUI or GUI
+katnotes git status            # notes changed since the last commit
+katnotes theme [name] [--app tui|gui]   # show or set the shared (or one app's) theme
 katnotes tasks sync [-n]       # set/remove contains_task in every note (-n: dry run)
 katnotes tasks list [--overdue] [--due-before fri] [--pri high] [--where key:value] [-a]
 katnotes tasks set page/<id>:<line> due tomorrow   # set {due:…}; no value removes the key
@@ -176,7 +187,7 @@ katnotes backlinks <id>        # notes that link here, with the lines
 katnotes config path|show|edit|set
 ```
 
-Every command accepts `--json` for scripting.
+Every command accepts `--json` for scripting. The commands shared with the command window below (`tag`, `set`, `pin`, `journal`, `todo`, `recent`, `git status`, `theme`, saved searches) run the same code as in the TUI and GUI, and `mv` and `rm` keep the apps' recent-notes list up to date.
 
 ## TUI keys
 

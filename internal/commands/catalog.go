@@ -22,6 +22,7 @@ import (
 const (
 	AppTUI = "tui"
 	AppGUI = "gui"
+	AppCLI = "cli" // the katnotes command line, which calls Exec directly
 )
 
 // ArgKind selects how an argument is completed.

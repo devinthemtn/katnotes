@@ -31,6 +31,27 @@ func Run(env *Env, input string) (Result, error) {
 	return r, err
 }
 
+// Exec runs the store command name with args already split, one value per
+// argument (a Rest argument is a single string). The CLI uses it so cobra's
+// argument handling and quoting apply instead of Parse's.
+func Exec(env *Env, name string, args []string) (Result, error) {
+	for _, s := range catalog {
+		if s.Name != name || s.run == nil || !s.inApp(env.App) {
+			continue
+		}
+		if s.NeedsNote && env.Note == nil {
+			return Result{}, fmt.Errorf("%s needs a note", s.Name)
+		}
+		r, err := s.run(env, args)
+		r.Command = s.Name
+		if r.Args == nil {
+			r.Args = args
+		}
+		return r, err
+	}
+	return Result{}, fmt.Errorf("no command %q", name)
+}
+
 func key(n *notes.Note) string { return string(n.Kind) + "/" + n.ID }
 
 // ResolveNote finds a note from what was typed: "kind/id", an exact title

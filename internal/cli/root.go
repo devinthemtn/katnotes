@@ -11,9 +11,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/devinthemtn/katnotes/internal/commands"
 	"github.com/devinthemtn/katnotes/internal/config"
 	"github.com/devinthemtn/katnotes/internal/editor"
 	"github.com/devinthemtn/katnotes/internal/notes"
+	"github.com/devinthemtn/katnotes/internal/recent"
 	"github.com/spf13/cobra"
 )
 
@@ -51,6 +53,7 @@ func NewRoot(version string, tui TUIFunc) *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			app.Out = cmd.OutOrStdout()
 			config.Install() //nolint:errcheck // defaults work without the file
 			cfg, err := config.Load()
 			if err != nil {
@@ -78,6 +81,9 @@ func NewRoot(version string, tui TUIFunc) *cobra.Command {
 		rmCmd(app), todayCmd(app), searchCmd(app), tagsCmd(app), mvCmd(app),
 		configCmd(app), tasksCmd(app), linksCmd(app), backlinksCmd(app),
 		todoCmd(app), syncCmd(app),
+		tagCmd(app), setCmd(app), unsetCmd(app), pinCmd(app), unpinCmd(app),
+		linkCmd(app), journalCmd(app), recentCmd(app), gitCmd(app),
+		themeCmd(app), savedCmd(app),
 	)
 	return root
 }
@@ -135,7 +141,9 @@ func kindFlags(cmd *cobra.Command) func() notes.Kind {
 	}
 }
 
-// resolve finds a note by id. "today" and "yesterday" are journal aliases.
+// resolve finds a note by id. "today" and "yesterday" are journal aliases;
+// failing an id or slug, it takes what the TUI and GUI accept: "kind/id", an
+// exact title, or a title prefix or substring only one note has.
 func (a *App) resolve(id string, kind notes.Kind) (*notes.Note, error) {
 	switch strings.ToLower(id) {
 	case "today":
@@ -148,11 +156,15 @@ func (a *App) resolve(id string, kind notes.Kind) (*notes.Note, error) {
 	}
 	found, err := a.Store.FindByID(id)
 	if err != nil {
+		if !errors.Is(err, notes.ErrNotFound) {
+			return nil, err
+		}
 		// Allow passing a page title instead of its slug.
-		if errors.Is(err, notes.ErrNotFound) {
-			if n, err2 := a.Store.Get(notes.KindPage, notes.Slugify(id)); err2 == nil {
-				return n, nil
-			}
+		if n, err2 := a.Store.Get(notes.KindPage, notes.Slugify(id)); err2 == nil {
+			return n, nil
+		}
+		if n, err2 := commands.ResolveNote(a.Store, id); err2 == nil {
+			return n, nil
 		}
 		return nil, err
 	}
@@ -160,4 +172,18 @@ func (a *App) resolve(id string, kind notes.Kind) (*notes.Note, error) {
 		return nil, fmt.Errorf("%q matches both a page and a journal entry; use -p or -j", id)
 	}
 	return found[0], nil
+}
+
+// forgetRecent drops n from the recently-opened list the TUI and GUI share.
+func (a *App) forgetRecent(n *notes.Note) {
+	if p, err := recent.Path(); err == nil {
+		recent.Forget(p, string(n.Kind)+"/"+n.ID) //nolint:errcheck // a convenience
+	}
+}
+
+// renameRecent follows a rename in the recently-opened list.
+func (a *App) renameRecent(from, to *notes.Note) {
+	if p, err := recent.Path(); err == nil {
+		recent.Rename(p, string(from.Kind)+"/"+from.ID, string(to.Kind)+"/"+to.ID) //nolint:errcheck // a convenience
+	}
 }

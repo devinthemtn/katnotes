@@ -2,15 +2,12 @@ package cli
 
 import (
 	"fmt"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
-	"github.com/devinthemtn/katnotes/internal/config"
 	"github.com/devinthemtn/katnotes/internal/gitsync"
-	"github.com/devinthemtn/katnotes/internal/notes"
 )
 
 // The CLI side of the features the TUI and GUI expose as ":" commands.
@@ -22,25 +19,17 @@ func todoCmd(a *App) *cobra.Command {
 		Short: "Add a task to today's journal (or --here <id>), e.g. todo call Sam {due:fri}",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			var n *notes.Note
-			var err error
-			if here != "" {
-				n, err = a.resolve(here, "")
-			} else {
-				n, _, err = a.Store.Journal(time.Now())
+			task := strings.Join(args, " ")
+			if here == "" {
+				_, err := a.exec(nil, "todo", task)
+				return err
 			}
+			n, err := a.resolve(here, "")
 			if err != nil {
 				return err
 			}
-			got, line, err := a.Store.AddTask(n.Kind, n.ID, strings.Join(args, " "))
-			if err != nil {
-				return err
-			}
-			if a.jsonOut {
-				return a.printJSON(got)
-			}
-			fmt.Fprintf(a.Out, "added task to %s/%s:%d\n", got.Kind, got.ID, a.Store.FileLine(got.Kind, got.ID, line))
-			return nil
+			_, err = a.exec(n, "todo here", task)
+			return err
 		},
 	}
 	cmd.Flags().StringVar(&here, "here", "", "add the task to this note instead of today's journal")
@@ -68,13 +57,4 @@ func syncCmd(a *App) *cobra.Command {
 			return nil
 		},
 	}
-}
-
-// templatesDir is the page templates folder in the config directory.
-func templatesDir() (string, error) {
-	d, err := config.Dir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(d, notes.TemplatesDirName), nil
 }

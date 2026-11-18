@@ -35,6 +35,8 @@ func appLabel(app string) string {
 		return "TUI"
 	case AppGUI:
 		return "GUI"
+	case AppCLI:
+		return "shared"
 	}
 	return "app"
 }

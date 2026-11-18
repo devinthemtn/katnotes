@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/devinthemtn/katnotes/internal/commands"
 	"github.com/devinthemtn/katnotes/internal/config"
 	"github.com/devinthemtn/katnotes/internal/editor"
 	"github.com/devinthemtn/katnotes/internal/notes"
@@ -23,7 +24,10 @@ func initCmd(a *App) *cobra.Command {
 		Short: "Create the notes directory (journal/ and pages/) and default config",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			p, _ := config.Path()
+			p, err := config.Path()
+			if err != nil {
+				return err
+			}
 			if a.jsonOut {
 				return a.printJSON(map[string]string{"notesDir": a.Store.Root, "config": p})
 			}
@@ -61,11 +65,7 @@ func newCmd(a *App) *cobra.Command {
 				if kind == notes.KindJournal || body != "" {
 					return fmt.Errorf("--template makes a page and can't be combined with -j or -m")
 				}
-				dir, derr := templatesDir()
-				if derr != nil {
-					return derr
-				}
-				src, terr := notes.ReadTemplate(dir, tmpl)
+				src, terr := notes.ReadTemplate(a.env(nil).TemplatesPath(), tmpl)
 				if terr != nil {
 					return terr
 				}
@@ -190,15 +190,19 @@ func rmCmd(a *App) *cobra.Command {
 			return err
 		}
 		if !force {
-			fmt.Fprintf(os.Stderr, "delete %s/%s (%q)? [y/N] ", n.Kind, n.ID, n.Title)
-			line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
-			if a := strings.ToLower(strings.TrimSpace(line)); a != "y" && a != "yes" {
+			if a.jsonOut {
+				return fmt.Errorf("rm with --json needs --force (it can't ask)")
+			}
+			fmt.Fprintf(cmd.ErrOrStderr(), "delete %s/%s (%q)? [y/N] ", n.Kind, n.ID, n.Title)
+			line, _ := bufio.NewReader(cmd.InOrStdin()).ReadString('\n')
+			if ans := strings.ToLower(strings.TrimSpace(line)); ans != "y" && ans != "yes" {
 				return fmt.Errorf("aborted")
 			}
 		}
 		if err := a.Store.Delete(n.Kind, n.ID); err != nil {
 			return err
 		}
+		a.forgetRecent(n)
 		if a.jsonOut {
 			return a.printJSON(map[string]string{"deleted": string(n.Kind) + "/" + n.ID})
 		}
@@ -225,6 +229,7 @@ func mvCmd(a *App) *cobra.Command {
 		if err != nil {
 			return err
 		}
+		a.renameRecent(n, r)
 		if a.jsonOut {
 			return a.printJSON(r)
 		}
@@ -269,14 +274,18 @@ func todayCmd(a *App) *cobra.Command {
 
 func searchCmd(a *App) *cobra.Command {
 	var byName, byTags bool
+	var saved, save string
 	cmd := &cobra.Command{
 		Use:   "search <query>",
 		Short: "Search notes: full text (default), --name (fuzzy title/filename) or --tags (all must match)",
-		Args:  cobra.MinimumNArgs(1),
+		Example: "  katnotes search --tags work -done --save work\n" +
+			"  katnotes search --saved work",
 	}
 	kind := kindFlags(cmd)
 	cmd.Flags().BoolVarP(&byName, "name", "n", false, "fuzzy match on titles and filenames")
 	cmd.Flags().BoolVar(&byTags, "tags", false, "notes with every listed tag (-tag excludes)")
+	cmd.Flags().StringVar(&saved, "saved", "", "run a saved search (see katnotes saved)")
+	cmd.Flags().StringVar(&save, "save", "", "also save this search under a name, for the TUI and GUI too")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		mode := notes.SearchText
 		switch {
@@ -287,7 +296,31 @@ func searchCmd(a *App) *cobra.Command {
 		case byTags:
 			mode = notes.SearchTags
 		}
-		res, err := a.Store.Find(notes.FindQuery{Mode: mode, Text: strings.Join(args, " "), Kind: kind()})
+		text := strings.Join(args, " ")
+		switch {
+		case saved != "":
+			if len(args) > 0 || byName || byTags || save != "" {
+				return fmt.Errorf("--saved takes no query, --name, --tags or --save")
+			}
+			r, err := commands.Exec(a.env(nil), "search", []string{saved})
+			if err != nil {
+				return err
+			}
+			m, err := notes.ParseSearchMode(r.Args[0])
+			if err != nil {
+				return err
+			}
+			mode, text = m, r.Args[1]
+		case len(args) == 0:
+			return fmt.Errorf("search needs a query (or --saved <name>)")
+		case save != "":
+			env := a.env(nil)
+			env.Search = commands.CurrentSearch{Mode: string(mode), Text: text}
+			if _, err := commands.Exec(env, "search save", []string{save}); err != nil {
+				return err
+			}
+		}
+		res, err := a.Store.Find(notes.FindQuery{Mode: mode, Text: text, Kind: kind()})
 		if err != nil {
 			return err
 		}
@@ -407,6 +440,9 @@ func tasksListCmd(a *App) *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			now := time.Now()
 			if overdue {
+				if dueBefore != "" {
+					return fmt.Errorf("use either --overdue or --due-before")
+				}
 				dueBefore = "yesterday"
 			}
 			if dueBefore != "" {
@@ -529,8 +565,14 @@ func configCmd(a *App) *cobra.Command {
 			Use: "path", Short: "Print the config file path", Args: cobra.NoArgs,
 			RunE: func(cmd *cobra.Command, _ []string) error {
 				p, err := config.Path()
+				if err != nil {
+					return err
+				}
+				if a.jsonOut {
+					return a.printJSON(map[string]string{"config": p})
+				}
 				fmt.Fprintln(a.Out, p)
-				return err
+				return nil
 			},
 		},
 		&cobra.Command{
@@ -613,6 +655,12 @@ func backlinksCmd(a *App) *cobra.Command {
 			return err
 		}
 		if a.jsonOut {
+			for i := range bl {
+				bl[i].Note.Body = ""
+			}
+			if bl == nil {
+				bl = []notes.Backlink{}
+			}
 			return a.printJSON(bl)
 		}
 		for _, b := range bl {
