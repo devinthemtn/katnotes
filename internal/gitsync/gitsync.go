@@ -17,6 +17,9 @@ import (
 // Timeout bounds each git command (network ones included).
 var Timeout = 60 * time.Second
 
+// errTimeout marks a git command that ran out of time.
+var errTimeout = errors.New("timed out")
+
 // ErrNotRepo means the folder isn't in a git work tree.
 var ErrNotRepo = errors.New("notes folder is not a git repository: run git init there to use sync")
 
@@ -52,7 +55,7 @@ func (r *Repo) git(args ...string) (string, error) {
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	err := cmd.Run()
 	if ctx.Err() != nil {
-		return "", fmt.Errorf("git %s: timed out after %s", args[0], Timeout)
+		return "", fmt.Errorf("git %s: %w after %s", args[0], errTimeout, Timeout)
 	}
 	if err != nil {
 		msg := strings.TrimSpace(stderr.String())
@@ -72,21 +75,23 @@ type Change struct {
 
 // Status lists uncommitted changes under Dir.
 func (r *Repo) Status() ([]Change, error) {
-	out, err := r.git("status", "--porcelain=v1", "--untracked-files=all", "--", ".")
+	// -z: NUL-separated and never quoted, so any file name reads back as is.
+	out, err := r.git("status", "--porcelain=v1", "-z", "--untracked-files=all", "--", ".")
 	if err != nil {
 		return nil, err
 	}
 	var cs []Change
-	for _, l := range strings.Split(out, "\n") {
+	fields := strings.Split(out, "\x00")
+	for i := 0; i < len(fields); i++ {
+		l := fields[i]
 		if len(l) < 4 {
 			continue
 		}
-		p := l[3:]
-		if i := strings.Index(p, " -> "); i >= 0 {
-			p = p[i+4:] // renamed: keep the new path
+		code := l[:2]
+		if code[0] == 'R' || code[0] == 'C' {
+			i++ // a rename or copy is followed by its old path; keep the new one
 		}
-		p = strings.Trim(p, `"`)
-		cs = append(cs, Change{Code: l[:2], Path: strings.TrimPrefix(p, r.prefix)})
+		cs = append(cs, Change{Code: code, Path: strings.TrimPrefix(l[3:], r.prefix)})
 	}
 	return cs, nil
 }
@@ -139,16 +144,19 @@ func (r *Repo) Sync(now time.Time) (Summary, error) {
 		}
 		s.Committed = len(cs)
 	}
-	up, err := r.git("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
-	if err != nil {
-		return s, nil // no upstream: a local-only repo is fine
+	up, err := r.upstream()
+	if err != nil || up == "" {
+		return s, err // no upstream: a local-only repo is fine
 	}
-	s.Upstream = strings.TrimSpace(up)
-	before, _ := r.git("rev-parse", "HEAD")
+	s.Upstream = up
+	before, _ := r.git("rev-parse", "-q", "--verify", "HEAD") // "" before the first commit
 	if _, err := r.git("pull", "-q", "--rebase", "--autostash"); err != nil {
 		return s, err
 	}
-	after, _ := r.git("rev-parse", "HEAD")
+	after, err := r.git("rev-parse", "HEAD")
+	if err != nil {
+		return s, err
+	}
 	s.Pulled = before != after
 	ahead, err := r.git("rev-list", "--count", "@{u}..HEAD")
 	if err == nil && strings.TrimSpace(ahead) != "0" {
@@ -158,4 +166,18 @@ func (r *Repo) Sync(now time.Time) (Summary, error) {
 		s.Pushed = true
 	}
 	return s, nil
+}
+
+// upstream is the current branch's upstream, e.g. "origin/main", or "" when
+// it has none, HEAD is detached, or the upstream branch doesn't exist yet
+// (a clone of an empty remote). Only a timeout is an error.
+func (r *Repo) upstream() (string, error) {
+	up, err := r.git("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
+	if errors.Is(err, errTimeout) {
+		return "", err
+	}
+	if err != nil {
+		return "", nil
+	}
+	return strings.TrimSpace(up), nil
 }

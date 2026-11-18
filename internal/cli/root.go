@@ -31,15 +31,6 @@ type App struct {
 	dir     string
 }
 
-// NewStore builds a Store from cfg.
-func NewStore(cfg config.Config) *notes.Store {
-	s := notes.New(cfg.NotesDir)
-	s.JournalTemplate = cfg.JournalTemplate
-	s.DateFormat = cfg.DateFormat
-	s.NoDoneDate = !cfg.TaskDoneDate
-	return s
-}
-
 // TUIFunc launches the TUI; set by main so the cli package does not import it.
 type TUIFunc func(app *App) error
 
@@ -63,7 +54,7 @@ func NewRoot(version string, tui TUIFunc) *cobra.Command {
 				cfg.NotesDir = config.ExpandHome(app.dir)
 			}
 			app.Cfg = cfg
-			app.Store = NewStore(cfg)
+			app.Store = commands.NewStore(cfg)
 			return app.Store.Init()
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -177,13 +168,13 @@ func (a *App) resolve(id string, kind notes.Kind) (*notes.Note, error) {
 // forgetRecent drops n from the recently-opened list the TUI and GUI share.
 func (a *App) forgetRecent(n *notes.Note) {
 	if p, err := recent.Path(); err == nil {
-		recent.Forget(p, string(n.Kind)+"/"+n.ID) //nolint:errcheck // a convenience
+		recent.Forget(p, n.Key()) //nolint:errcheck // a convenience
 	}
 }
 
 // renameRecent follows a rename in the recently-opened list.
 func (a *App) renameRecent(from, to *notes.Note) {
 	if p, err := recent.Path(); err == nil {
-		recent.Rename(p, string(from.Kind)+"/"+from.ID, string(to.Kind)+"/"+to.ID) //nolint:errcheck // a convenience
+		recent.Rename(p, from.Key(), to.Key()) //nolint:errcheck // a convenience
 	}
 }

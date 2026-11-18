@@ -165,21 +165,6 @@ func SetLineMeta(line, key, value string) (string, bool) {
 	return line[:loc[6]] + withMeta(line[loc[6]:loc[7]], key, value), true
 }
 
-// Due returns the task's due date, if it has a valid one.
-func (t Task) Due() (time.Time, bool) { return t.date(MetaDue) }
-
-// Start returns the task's start date, if it has a valid one.
-func (t Task) Start() (time.Time, bool) { return t.date(MetaStart) }
-
-func (t Task) date(key string) (time.Time, bool) {
-	v, ok := t.Meta[key]
-	if !ok {
-		return time.Time{}, false
-	}
-	d, err := time.ParseInLocation(DateLayout, v, time.Local)
-	return d, err == nil
-}
-
 // Priority ranks the task's pri value: high 3, med 2, low 1, otherwise 0.
 func (t Task) Priority() int { return PriorityRank(t.Meta[MetaPri]) }
 

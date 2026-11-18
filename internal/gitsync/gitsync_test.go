@@ -104,3 +104,42 @@ func TestSyncLocalAndRemote(t *testing.T) {
 		t.Fatalf("idle sync = %+v, %v", s, err)
 	}
 }
+
+func TestStatusOddNamesAndRenames(t *testing.T) {
+	setupEnv(t)
+	dir := t.TempDir()
+	run(t, dir, "init", "-q", "-b", "main", dir)
+	os.MkdirAll(filepath.Join(dir, "pages"), 0o755)
+	os.WriteFile(filepath.Join(dir, "pages", "old.md"), []byte("o\n"), 0o644)
+	run(t, dir, "add", ".")
+	run(t, dir, "commit", "-q", "-m", "first")
+	run(t, dir, "mv", "pages/old.md", "pages/new.md")
+	os.WriteFile(filepath.Join(dir, "pages", `a "b" c.md`), []byte("x\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "pages", "café.md"), []byte("x\n"), 0o644)
+
+	r, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cs, err := r.Status()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, c := range cs {
+		got[c.Path] = c.Code
+	}
+	want := map[string]string{"pages/new.md": "R ", `pages/a "b" c.md`: "??", "pages/café.md": "??"}
+	if len(got) != len(want) {
+		t.Fatalf("status = %+v", cs)
+	}
+	for p, code := range want {
+		if got[p] != code {
+			t.Errorf("%s: code %q, want %q (all: %+v)", p, got[p], code, cs)
+		}
+	}
+	// No upstream: Sync commits and stops without an error.
+	if s, err := r.Sync(time.Now()); err != nil || s.Upstream != "" || s.Committed != 3 {
+		t.Errorf("sync = %+v, %v", s, err)
+	}
+}

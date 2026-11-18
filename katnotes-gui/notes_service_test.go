@@ -60,7 +60,7 @@ func TestServiceFlow(t *testing.T) {
 		t.Errorf("body %q", got.Body)
 	}
 
-	res, _ := s.Search("forced", "")
+	res, _ := s.Find("text", "forced", "", "", "")
 	if len(res) != 1 {
 		t.Errorf("search: %+v", res)
 	}

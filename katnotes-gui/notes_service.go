@@ -10,7 +10,6 @@ import (
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 
-	"github.com/devinthemtn/katnotes/internal/cli"
 	"github.com/devinthemtn/katnotes/internal/commands"
 	"github.com/devinthemtn/katnotes/internal/config"
 	"github.com/devinthemtn/katnotes/internal/luacmd"
@@ -55,7 +54,7 @@ func (s *NotesService) reload() error {
 	if err != nil {
 		return err
 	}
-	st := cli.NewStore(cfg)
+	st := commands.NewStore(cfg)
 	if err := st.Init(); err != nil {
 		return err
 	}
@@ -174,19 +173,8 @@ func (s *NotesService) Rename(kind, id, title string) (*RenameResult, error) {
 	if n == nil {
 		return nil, err
 	}
-	renameRecent(kind+"/"+id, string(n.Kind)+"/"+n.ID)
+	renameRecent(kind+"/"+id, n.Key())
 	return &RenameResult{Note: n, Updated: updated}, err
-}
-
-// Links lists a note's outgoing links to other notes.
-func (s *NotesService) Links(kind, id string) ([]notes.LinkRef, error) {
-	st := s.lock()
-	defer s.mu.Unlock()
-	k, err := notes.ParseKind(kind)
-	if err != nil {
-		return nil, err
-	}
-	return st.Links(k, id)
 }
 
 // Backlinks lists the notes that link to a note, with the linking lines.
@@ -221,24 +209,6 @@ func (s *NotesService) Today() (*notes.Note, error) {
 	defer s.mu.Unlock()
 	n, _, err := st.Today()
 	return n, err
-}
-
-// Search does full-text search; kind may be "".
-func (s *NotesService) Search(query, kind string) ([]notes.Match, error) {
-	st := s.lock()
-	defer s.mu.Unlock()
-	k, err := parseKind(kind)
-	if err != nil {
-		return nil, err
-	}
-	res, err := st.Search(query, k)
-	for i := range res {
-		res[i].Note.Body = ""
-	}
-	if res == nil {
-		res = []notes.Match{}
-	}
-	return res, err
 }
 
 // Find runs a search in one of the modes "name" (fuzzy title/filename),
@@ -666,7 +636,7 @@ func (s *NotesService) ApplyFrontmatter(kind, id, text string) (*RenameResult, e
 	if err != nil {
 		return nil, err
 	}
-	renameRecent(kind+"/"+id, string(r.Kind)+"/"+r.ID)
+	renameRecent(kind+"/"+id, r.Key())
 	if relinked == nil {
 		relinked = []string{}
 	}
@@ -708,11 +678,8 @@ func (s *NotesService) LastNote() string {
 	st := s.lock()
 	defer s.mu.Unlock()
 	for _, k := range recent.Load(p) {
-		kind, id, _ := strings.Cut(k, "/")
-		if pk, err := notes.ParseKind(kind); err == nil {
-			if _, err := st.Get(pk, id); err == nil {
-				return k
-			}
+		if _, err := st.GetKey(k); err == nil {
+			return k
 		}
 	}
 	return ""

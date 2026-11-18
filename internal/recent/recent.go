@@ -86,12 +86,5 @@ func update(path string, f func([]string) []string) error {
 	if len(keys) > Limit {
 		keys = keys[:Limit]
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, []byte(strings.Join(keys, "\n")+"\n"), 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return config.WriteFile(path, []byte(strings.Join(keys, "\n")+"\n"))
 }

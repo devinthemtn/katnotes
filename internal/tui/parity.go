@@ -107,7 +107,7 @@ func (m *model) frontmatterView(n *notes.Note) string {
 // touchRecent records n as recently opened (shared with the GUI).
 func (m *model) touchRecent(n *notes.Note) {
 	if n != nil && m.recentPath != "" {
-		recent.Touch(m.recentPath, key(n)) //nolint:errcheck // a convenience
+		recent.Touch(m.recentPath, n.Key()) //nolint:errcheck // a convenience
 	}
 }
 
@@ -146,15 +146,7 @@ func (m *model) applyStartPage() {
 }
 
 func (m *model) noteByKey(k string) *notes.Note {
-	kind, id, ok := strings.Cut(k, "/")
-	if !ok {
-		return nil
-	}
-	pk, err := notes.ParseKind(kind)
-	if err != nil {
-		return nil
-	}
-	n, err := m.app.Store.Get(pk, id)
+	n, err := m.app.Store.GetKey(k)
 	if err != nil {
 		return nil
 	}

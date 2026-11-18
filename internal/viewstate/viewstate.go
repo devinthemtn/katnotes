@@ -70,14 +70,7 @@ func update(path string, f func(*State) error) (State, error) {
 	if err != nil {
 		return st, err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return st, err
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, append(data, '\n'), 0o644); err != nil {
-		return st, err
-	}
-	return st, os.Rename(tmp, path)
+	return st, config.WriteFile(path, append(data, '\n'))
 }
 
 // SetSort remembers the sort order for a kind's list.

@@ -2,7 +2,6 @@ package notes
 
 import (
 	"sort"
-	"strings"
 )
 
 // LineMatch is a body line that matched a search.
@@ -36,15 +35,6 @@ func (m Match) score() int {
 }
 
 const maxLinesPerMatch = 5
-
-// Search is a full-text search (Find in SearchText mode). An empty kind
-// searches everything; an empty query finds nothing.
-func (s *Store) Search(query string, kind Kind) ([]Match, error) {
-	if strings.TrimSpace(query) == "" {
-		return nil, nil
-	}
-	return s.Find(FindQuery{Mode: SearchText, Text: query, Kind: kind})
-}
 
 // Tags returns every tag in use with the number of notes carrying it.
 func (s *Store) Tags() (map[string]int, error) {

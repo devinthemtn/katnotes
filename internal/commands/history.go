@@ -59,12 +59,5 @@ func AddHistory(path, entry string) ([]string, error) {
 	for i := len(out) - 1; i >= 0; i-- {
 		b.WriteString(out[i] + "\n")
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return out, err
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, []byte(b.String()), 0o644); err != nil {
-		return out, err
-	}
-	return out, os.Rename(tmp, path)
+	return out, config.WriteFile(path, []byte(b.String()))
 }

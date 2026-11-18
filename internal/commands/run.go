@@ -52,8 +52,6 @@ func Exec(env *Env, name string, args []string) (Result, error) {
 	return Result{}, fmt.Errorf("no command %q", name)
 }
 
-func key(n *notes.Note) string { return string(n.Kind) + "/" + n.ID }
-
 // ResolveNote finds a note from what was typed: "kind/id", an exact title
 // (pages before journal entries), an id, or a title prefix or substring that
 // only one note has.
@@ -138,7 +136,7 @@ func runOpen(env *Env, args []string) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	return Result{Note: n, Status: "opened " + key(n)}, nil
+	return Result{Note: n, Status: "opened " + n.Key()}, nil
 }
 
 func runNew(env *Env, args []string) (Result, error) {
@@ -146,7 +144,7 @@ func runNew(env *Env, args []string) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	return Result{Note: n, Changed: true, Edit: true, Status: "created " + key(n)}, nil
+	return Result{Note: n, Changed: true, Edit: true, Status: "created " + n.Key()}, nil
 }
 
 func runJournal(env *Env, args []string) (Result, error) {
@@ -162,9 +160,9 @@ func runJournal(env *Env, args []string) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	r := Result{Note: n, Changed: created, Edit: created, Status: "opened " + key(n)}
+	r := Result{Note: n, Changed: created, Edit: created, Status: "opened " + n.Key()}
 	if created {
-		r.Status = "created " + key(n)
+		r.Status = "created " + n.Key()
 	}
 	return r, nil
 }
@@ -184,13 +182,13 @@ func runTagAdd(env *Env, args []string) (Result, error) {
 		}
 	}
 	if len(added) == 0 {
-		return Result{Note: n, Status: key(n) + " already has " + hashTags(add)}, nil
+		return Result{Note: n, Status: n.Key() + " already has " + hashTags(add)}, nil
 	}
 	n.Tags = append(n.Tags, added...)
 	if err := env.Store.Save(n); err != nil {
 		return Result{}, err
 	}
-	return Result{Note: n, Changed: true, Status: "tagged " + key(n) + " " + hashTags(added)}, nil
+	return Result{Note: n, Changed: true, Status: "tagged " + n.Key() + " " + hashTags(added)}, nil
 }
 
 func runTagRm(env *Env, args []string) (Result, error) {
@@ -211,7 +209,7 @@ func runTagRm(env *Env, args []string) (Result, error) {
 		}
 	}
 	if len(removed) == 0 {
-		return Result{}, fmt.Errorf("%s has no tag %s", key(n), hashTags(notes.NormalizeTags(args)))
+		return Result{}, fmt.Errorf("%s has no tag %s", n.Key(), hashTags(notes.NormalizeTags(args)))
 	}
 	if keep == nil {
 		keep = []string{}
@@ -220,7 +218,7 @@ func runTagRm(env *Env, args []string) (Result, error) {
 	if err := env.Store.Save(n); err != nil {
 		return Result{}, err
 	}
-	return Result{Note: n, Changed: true, Status: "removed " + hashTags(removed) + " from " + key(n)}, nil
+	return Result{Note: n, Changed: true, Status: "removed " + hashTags(removed) + " from " + n.Key()}, nil
 }
 
 func runSet(env *Env, args []string) (Result, error) {
@@ -230,10 +228,10 @@ func runSet(env *Env, args []string) (Result, error) {
 		return Result{}, err
 	}
 	r := Result{Note: n, Changed: true, Relinked: relinked,
-		Status: fmt.Sprintf("set %s = %s on %s", field, FieldText(n, field), key(n))}
-	if field == "title" && key(n) != key(env.Note) {
-		r.Status = "renamed to " + key(n)
-		recent.Rename(env.recentPath(), key(env.Note), key(n)) //nolint:errcheck // a convenience
+		Status: fmt.Sprintf("set %s = %s on %s", field, FieldText(n, field), n.Key())}
+	if field == "title" && n.Key() != env.Note.Key() {
+		r.Status = "renamed to " + n.Key()
+		recent.Rename(env.recentPath(), env.Note.Key(), n.Key()) //nolint:errcheck // a convenience
 	}
 	r.Status += relinkedText(relinked)
 	return r, nil
@@ -244,7 +242,7 @@ func runUnset(env *Env, args []string) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	return Result{Note: n, Changed: true, Status: "removed " + args[0] + " from " + key(n)}, nil
+	return Result{Note: n, Changed: true, Status: "removed " + args[0] + " from " + n.Key()}, nil
 }
 
 func relinkedText(relinked []string) string {
@@ -259,9 +257,9 @@ func runRename(env *Env, args []string) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	recent.Rename(env.recentPath(), key(env.Note), key(n)) //nolint:errcheck // a convenience
+	recent.Rename(env.recentPath(), env.Note.Key(), n.Key()) //nolint:errcheck // a convenience
 	return Result{Note: n, Changed: true, Relinked: relinked,
-		Status: "renamed to " + key(n) + relinkedText(relinked)}, nil
+		Status: "renamed to " + n.Key() + relinkedText(relinked)}, nil
 }
 
 func runCopyLink(env *Env, _ []string) (Result, error) {
@@ -278,7 +276,7 @@ func runLinks(env *Env, _ []string) (Result, error) {
 	r := Result{UI: "links", PickTitle: "Links from " + env.Note.Title, Pick: []Choice{}}
 	seen := map[string]bool{}
 	for _, l := range refs {
-		k := string(l.Kind) + "/" + l.ID
+		k := notes.Key(l.Kind, l.ID)
 		if seen[k] {
 			continue
 		}
@@ -289,7 +287,7 @@ func runLinks(env *Env, _ []string) (Result, error) {
 		}
 		r.Pick = append(r.Pick, Choice{Kind: l.Kind, ID: l.ID, Title: l.Title, Detail: d, Exists: l.Exists})
 	}
-	r.Status = fmt.Sprintf("%d link(s) from %s", len(r.Pick), key(env.Note))
+	r.Status = fmt.Sprintf("%d link(s) from %s", len(r.Pick), env.Note.Key())
 	return r, nil
 }
 
@@ -301,9 +299,9 @@ func runBacklinks(env *Env, _ []string) (Result, error) {
 	r := Result{UI: "backlinks", PickTitle: "Links to " + env.Note.Title, Pick: []Choice{}}
 	for _, b := range bl {
 		r.Pick = append(r.Pick, Choice{Kind: b.Note.Kind, ID: b.Note.ID, Title: b.Note.Title,
-			Detail: fmt.Sprintf("%s · %d line(s)", key(&b.Note), len(b.Lines)), Exists: true})
+			Detail: fmt.Sprintf("%s · %d line(s)", b.Note.Key(), len(b.Lines)), Exists: true})
 	}
-	r.Status = fmt.Sprintf("%d note(s) link to %s", len(r.Pick), key(env.Note))
+	r.Status = fmt.Sprintf("%d note(s) link to %s", len(r.Pick), env.Note.Key())
 	return r, nil
 }
 
@@ -317,7 +315,7 @@ func runSyncTasks(env *Env, _ []string) (Result, error) {
 	}
 	ids := make([]string, 0, len(changes))
 	for _, c := range changes {
-		ids = append(ids, string(c.Kind)+"/"+c.ID)
+		ids = append(ids, notes.Key(c.Kind, c.ID))
 	}
 	return Result{Changed: true, Status: fmt.Sprintf("sync-tasks: updated %d note(s): %s", len(changes), strings.Join(ids, ", "))}, nil
 }

@@ -187,14 +187,14 @@ func TestListSearchTags(t *testing.T) {
 		t.Errorf("tag filter: %v", ids(tui))
 	}
 
-	res, err := s.Search("BUBBLETEA", "")
+	res, err := s.Find(FindQuery{Mode: SearchText, Text: "BUBBLETEA"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(res) != 2 || len(res[0].Lines) == 0 {
 		t.Errorf("search: %+v", res)
 	}
-	res, _ = s.Search("tui", KindPage)
+	res, _ = s.Find(FindQuery{Mode: SearchText, Text: "tui", Kind: KindPage})
 	if len(res) != 1 || res[0].Note.ID != "alpha" {
 		t.Errorf("tag search: %+v", res)
 	}

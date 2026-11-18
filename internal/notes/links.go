@@ -250,7 +250,7 @@ func (s *Store) rewriteLinks(kind Kind, oldID, newID, oldTitle, newTitle string)
 		if err := s.Save(n); err != nil {
 			return changed, fmt.Errorf("%s/%s: %w", n.Kind, n.ID, err)
 		}
-		changed = append(changed, string(n.Kind)+"/"+n.ID)
+		changed = append(changed, n.Key())
 	}
 	return changed, nil
 }

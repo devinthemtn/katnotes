@@ -438,7 +438,7 @@ func noteSuggestions(env *Env, q string) []Suggestion {
 	if q == "" {
 		byKey := map[string]*notes.Note{}
 		for i := range ms {
-			byKey[key(&ms[i].Note)] = &ms[i].Note
+			byKey[ms[i].Note.Key()] = &ms[i].Note
 		}
 		seen := map[string]bool{}
 		for _, k := range recent.Load(env.recentPath()) {
@@ -449,13 +449,13 @@ func noteSuggestions(env *Env, q string) []Suggestion {
 		}
 		sort.SliceStable(ms, func(i, j int) bool { return ms[i].Note.Updated.After(ms[j].Note.Updated) })
 		for i := range ms {
-			if k := key(&ms[i].Note); !seen[k] {
+			if k := ms[i].Note.Key(); !seen[k] {
 				out = append(out, sug(&ms[i].Note, k))
 			}
 		}
 	} else {
 		for i := range ms {
-			out = append(out, sug(&ms[i].Note, key(&ms[i].Note)))
+			out = append(out, sug(&ms[i].Note, ms[i].Note.Key()))
 		}
 	}
 	if len(out) > maxItems {

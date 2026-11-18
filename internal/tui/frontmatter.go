@@ -35,7 +35,7 @@ func (m *model) frontmatterCmd() tea.Cmd {
 		m.setErr(err)
 		return nil
 	}
-	text, ok := m.fmDrafts[key(n)]
+	text, ok := m.fmDrafts[n.Key()]
 	if !ok {
 		if text, err = frontmatterTemplate(m.app.Store, n); err != nil {
 			m.setErr(fmt.Errorf("frontmatter: %w", err))
@@ -84,7 +84,7 @@ func frontmatterTemplate(s *notes.Store, n *notes.Note) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	head := "# Frontmatter for " + key(n) + ". Save and quit to apply, quit without saving to cancel.\n"
+	head := "# Frontmatter for " + n.Key() + ". Save and quit to apply, quit without saving to cancel.\n"
 	if !has {
 		head += "# This note has no frontmatter yet. These values were inferred from the\n" +
 			"# file (first heading, file dates); saving adds them to it.\n"
@@ -96,7 +96,7 @@ func frontmatterTemplate(s *notes.Store, n *notes.Note) (string, error) {
 
 func (m *model) afterFrontmatterEdit(msg fmEditedMsg) {
 	defer os.Remove(msg.path)
-	k := key(msg.n)
+	k := msg.n.Key()
 	if msg.err != nil {
 		m.setErr(fmt.Errorf("editor: %w", msg.err))
 		return
@@ -135,9 +135,9 @@ func (m *model) afterFrontmatterEdit(msg fmEditedMsg) {
 		return
 	}
 	delete(m.fmDrafts, k)
-	status := "frontmatter saved for " + key(r)
-	if key(r) != k {
-		status = "frontmatter saved; renamed to " + key(r)
+	status := "frontmatter saved for " + r.Key()
+	if r.Key() != k {
+		status = "frontmatter saved; renamed to " + r.Key()
 	}
 	if len(relinked) > 0 {
 		status += fmt.Sprintf(" · updated links in %d note(s)", len(relinked))
@@ -145,7 +145,7 @@ func (m *model) afterFrontmatterEdit(msg fmEditedMsg) {
 	m.cache = map[string]string{}
 	m.setStatus(status)
 	m.reload()
-	m.selectKey(key(r))
+	m.selectKey(r.Key())
 }
 
 // onlyComments reports whether text has no YAML besides # comments.

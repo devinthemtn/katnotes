@@ -21,7 +21,7 @@ func runNewFrom(env *Env, args []string) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	return Result{Note: n, Changed: true, Edit: true, Status: "created " + key(n) + " from " + args[0]}, nil
+	return Result{Note: n, Changed: true, Edit: true, Status: "created " + n.Key() + " from " + args[0]}, nil
 }
 
 // themeShared is the ":theme" value that clears this app's own theme, so it
@@ -90,15 +90,7 @@ func runTheme(env *Env, args []string) (Result, error) {
 func runRecent(env *Env, _ []string) (Result, error) {
 	r := Result{PickTitle: "Recent notes", Pick: []Choice{}}
 	for _, k := range recent.Load(env.recentPath()) {
-		kind, id, ok := strings.Cut(k, "/")
-		if !ok {
-			continue
-		}
-		pk, err := notes.ParseKind(kind)
-		if err != nil {
-			continue
-		}
-		n, err := env.Store.Get(pk, id)
+		n, err := env.Store.GetKey(k)
 		if err != nil {
 			continue // deleted or renamed outside the apps
 		}
@@ -114,7 +106,7 @@ func addTask(env *Env, n *notes.Note, text string) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	return Result{Note: got, Changed: true, Status: fmt.Sprintf("added task to %s:%d", key(got), env.Store.FileLine(got.Kind, got.ID, line))}, nil
+	return Result{Note: got, Changed: true, Status: fmt.Sprintf("added task to %s:%d", got.Key(), env.Store.FileLine(got.Kind, got.ID, line))}, nil
 }
 
 func runTodo(env *Env, args []string) (Result, error) {
@@ -131,24 +123,24 @@ func runTodoHere(env *Env, args []string) (Result, error) { return addTask(env, 
 
 func runPin(env *Env, _ []string) (Result, error) {
 	if env.Note.Pinned() {
-		return Result{Status: key(env.Note) + " is already pinned"}, nil
+		return Result{Status: env.Note.Key() + " is already pinned"}, nil
 	}
 	n, _, err := env.Store.SetField(env.Note, notes.PinnedKey, "true")
 	if err != nil {
 		return Result{}, err
 	}
-	return Result{Note: n, Changed: true, Status: "pinned " + key(n)}, nil
+	return Result{Note: n, Changed: true, Status: "pinned " + n.Key()}, nil
 }
 
 func runUnpin(env *Env, _ []string) (Result, error) {
 	if !env.Note.Pinned() {
-		return Result{Status: key(env.Note) + " isn't pinned"}, nil
+		return Result{Status: env.Note.Key() + " isn't pinned"}, nil
 	}
 	n, err := env.Store.UnsetField(env.Note, notes.PinnedKey)
 	if err != nil {
 		return Result{}, err
 	}
-	return Result{Note: n, Changed: true, Status: "unpinned " + key(n)}, nil
+	return Result{Note: n, Changed: true, Status: "unpinned " + n.Key()}, nil
 }
 
 func runSync(env *Env, _ []string) (Result, error) {

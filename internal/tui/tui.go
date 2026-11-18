@@ -143,7 +143,7 @@ func (i taskNoteItem) Description() string {
 	if t, ok := firstOpen(i.nt.Tasks); ok {
 		parts = append(parts, "☐ "+t.Text)
 	} else {
-		parts = append(parts, string(i.nt.Note.Kind)+"/"+i.nt.Note.ID)
+		parts = append(parts, notes.Key(i.nt.Note.Kind, i.nt.Note.ID))
 	}
 	return strings.Join(parts, " · ")
 }
@@ -252,13 +252,13 @@ func nextPriority(p string) string {
 func itemKey(it list.Item) string {
 	switch v := it.(type) {
 	case noteItem:
-		return key(&v.n)
+		return v.n.Key()
 	case taskNoteItem:
-		return key(&v.nt.Note)
+		return v.nt.Note.Key()
 	case taskItem:
-		return fmt.Sprintf("%s#%d", key(&v.n), v.t.Line)
+		return fmt.Sprintf("%s#%d", v.n.Key(), v.t.Line)
 	case missingItem:
-		return "missing:" + string(v.l.Kind) + "/" + v.l.ID
+		return "missing:" + notes.Key(v.l.Kind, v.l.ID)
 	}
 	return ""
 }
@@ -412,8 +412,6 @@ func (m *model) setItemHeight(items []list.Item) {
 
 func (m model) Init() tea.Cmd { return nil }
 
-func key(n *notes.Note) string { return string(n.Kind) + "/" + n.ID }
-
 // reload rebuilds the list for the current tab, filters and search.
 func (m *model) reload() {
 	sel := itemKey(m.list.SelectedItem())
@@ -467,7 +465,7 @@ func (m *model) reload() {
 		res, err = m.app.Store.Find(notes.FindQuery{Mode: m.searchMode, Text: m.query, Kind: kind, Tag: m.tagFilter, Sort: m.sortFor(kind)})
 		m.results = map[string]notes.Match{}
 		for _, r := range res {
-			m.results[key(&r.Note)] = r
+			m.results[r.Note.Key()] = r
 			it := noteItem{n: r.Note}
 			if len(r.Lines) > 0 {
 				it.match = strings.TrimSpace(r.Lines[0].Text)
@@ -520,7 +518,7 @@ func (m *model) linkItems() ([]list.Item, error) {
 	ls, err := m.app.Store.Links(of.Kind, of.ID)
 	seen := map[string]bool{}
 	for _, l := range ls {
-		k := string(l.Kind) + "/" + l.ID
+		k := notes.Key(l.Kind, l.ID)
 		if seen[k] {
 			continue
 		}
@@ -557,7 +555,7 @@ func (m *model) linkedFrom(n *notes.Note) string {
 // selectKey moves the cursor to the note with key k, if listed.
 func (m *model) selectKey(k string) {
 	for i, it := range m.list.Items() {
-		if n := noteOf(it); n != nil && key(n) == k {
+		if n := noteOf(it); n != nil && n.Key() == k {
 			m.list.Select(i)
 			break
 		}
@@ -590,7 +588,7 @@ func (m *model) showNote(n *notes.Note) {
 		m.list.Select(0)
 	}
 	m.reload()
-	k := key(n)
+	k := n.Key()
 	if itemKey(m.list.SelectedItem()) != k && !m.hasItem(k) {
 		m.tagFilter, m.query = "", ""
 		m.reload()
@@ -682,7 +680,7 @@ func (m *model) updatePreview() {
 		}
 		content = out + m.linkedFrom(n)
 	} else if it, ok := m.list.SelectedItem().(missingItem); ok {
-		k = "missing:" + string(it.l.Kind) + "/" + it.l.ID
+		k = "missing:" + notes.Key(it.l.Kind, it.l.ID)
 		content = statusStyle.Render(fmt.Sprintf("\n  %s/%s doesn't exist yet.\n\n  enter: create it and open it in your editor", it.l.Kind, it.l.ID))
 	} else if it, ok := m.list.SelectedItem().(tagItem); ok {
 		k = "tag:" + it.t.Tag
@@ -736,7 +734,7 @@ func (m *model) previewCmd(n *notes.Note) tea.Cmd {
 		m.setErr(fmt.Errorf("previewer: %w", err))
 		return nil
 	}
-	m.setStatus("opened " + key(n) + " in " + filepath.Base(c.Args[0]))
+	m.setStatus("opened " + n.Key() + " in " + filepath.Base(c.Args[0]))
 	return nil
 }
 
@@ -751,7 +749,7 @@ func (m *model) externalCmd(n *notes.Note) tea.Cmd {
 		m.setErr(fmt.Errorf("external: %w (set tui_open_with or open_with)", err))
 		return nil
 	}
-	m.setStatus("opened " + key(n) + " in the default app")
+	m.setStatus("opened " + n.Key() + " in the default app")
 	return nil
 }
 
@@ -773,7 +771,7 @@ func (m *model) openWithCmd(n *notes.Note, cmdline string) tea.Cmd {
 		m.setErr(fmt.Errorf("open-with: %w", err))
 		return nil
 	}
-	m.setStatus("opened " + key(n) + " in " + editor.ProgramName(c.Args[0]))
+	m.setStatus("opened " + n.Key() + " in " + editor.ProgramName(c.Args[0]))
 	return nil
 }
 
@@ -821,7 +819,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else if n, err := m.app.AfterEdit(msg.n, msg.before); err != nil {
 			m.setErr(err)
 		} else {
-			m.setStatus("saved " + key(n))
+			m.setStatus("saved " + n.Key())
 		}
 		m.reload()
 		return m, nil
@@ -923,12 +921,12 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if created {
-			m.setStatus("created " + key(n))
+			m.setStatus("created " + n.Key())
 		}
 		m.tab = tabJournal
 		m.clearViews()
 		m.reload()
-		m.selectKey(key(n))
+		m.selectKey(n.Key())
 		return m, m.editCmd(n)
 	case "r":
 		if n := m.selected(); n != nil {
@@ -982,9 +980,9 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if err != nil {
 				m.setErr(err)
 			} else if it.t.Done {
-				m.setStatus("unchecked in " + key(n))
+				m.setStatus("unchecked in " + n.Key())
 			} else {
-				m.setStatus("checked in " + key(n))
+				m.setStatus("checked in " + n.Key())
 			}
 			m.reload()
 		}
@@ -1024,7 +1022,7 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.pick = nil
 				m.touchRecent(n)
 				m.showNote(n)
-				m.setStatus("opened " + key(n) + " (enter edits)")
+				m.setStatus("opened " + n.Key() + " (enter edits)")
 			}
 			return m, nil
 		}
@@ -1035,9 +1033,9 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.setErr(err)
 				return m, nil
 			}
-			m.setStatus("created " + key(n))
+			m.setStatus("created " + n.Key())
 			m.reload()
-			m.selectKey(key(n))
+			m.selectKey(n.Key())
 			return m, m.editCmd(n)
 		case taskItem:
 			n := it.n
@@ -1120,9 +1118,9 @@ func (m model) submit(val string) (tea.Model, tea.Cmd) {
 			m.setErr(err)
 			return m, nil
 		}
-		m.setStatus("created " + key(n))
+		m.setStatus("created " + n.Key())
 		m.reload()
-		m.selectKey(key(n))
+		m.selectKey(n.Key())
 		return m, m.editCmd(n)
 	case inTag:
 		m.tagFilter = strings.ToLower(strings.TrimPrefix(val, "#"))
@@ -1151,15 +1149,15 @@ func (m model) submit(val string) (tea.Model, tea.Cmd) {
 				m.setErr(err)
 				return m, nil
 			}
-			recent.Rename(m.recentPath, key(n), key(r)) //nolint:errcheck // a convenience
-			msg := "renamed to " + key(r)
+			recent.Rename(m.recentPath, n.Key(), r.Key()) //nolint:errcheck // a convenience
+			msg := "renamed to " + r.Key()
 			if len(relinked) > 0 {
 				msg += fmt.Sprintf(" · updated links in %d note(s)", len(relinked))
 			}
 			m.cache = map[string]string{}
 			m.setStatus(msg)
 			m.reload()
-			m.selectKey(key(r))
+			m.selectKey(r.Key())
 		}
 	}
 	return m, nil
@@ -1172,8 +1170,8 @@ func (m model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if err := m.app.Store.Delete(n.Kind, n.ID); err != nil {
 			m.setErr(err)
 		} else {
-			m.setStatus("deleted " + key(n))
-			recent.Forget(m.recentPath, key(n)) //nolint:errcheck // a convenience
+			m.setStatus("deleted " + n.Key())
+			recent.Forget(m.recentPath, n.Key()) //nolint:errcheck // a convenience
 		}
 		m.reload()
 	} else {
@@ -1248,7 +1246,7 @@ func (m model) View() string {
 	case modeInput:
 		bottom = m.input.View()
 	case modeConfirm:
-		bottom = errStyle.Render(fmt.Sprintf("Delete %s (%q)? y/N", key(m.confirm), m.confirm.Title))
+		bottom = errStyle.Render(fmt.Sprintf("Delete %s (%q)? y/N", m.confirm.Key(), m.confirm.Title))
 	default:
 		if m.status != "" {
 			if m.isErr {

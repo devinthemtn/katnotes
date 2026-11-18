@@ -346,3 +346,30 @@ func normStartPage(v string) (string, error) {
 	}
 	return "", fmt.Errorf("start_page must be none, last, today, page/<id> or journal/<id>, got %q", v)
 }
+
+// WriteFile replaces the file at path with data in one step (a temporary
+// file in the same folder, then a rename), creating the folder if needed, so
+// the TUI and GUI never read a half-written state file.
+func WriteFile(path string, data []byte) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+"-*.tmp")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(0o644); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
+}

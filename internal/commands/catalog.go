@@ -25,6 +25,16 @@ const (
 	AppCLI = "cli" // the katnotes command line, which calls Exec directly
 )
 
+// NewStore builds the note store cfg describes. Every frontend opens its
+// store this way.
+func NewStore(cfg config.Config) *notes.Store {
+	s := notes.New(cfg.NotesDir)
+	s.JournalTemplate = cfg.JournalTemplate
+	s.DateFormat = cfg.DateFormat
+	s.NoDoneDate = !cfg.TaskDoneDate
+	return s
+}
+
 // ArgKind selects how an argument is completed.
 type ArgKind string
 

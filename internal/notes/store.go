@@ -49,6 +49,32 @@ func ParseKind(s string) (Kind, error) {
 	return "", fmt.Errorf("unknown kind %q (want page or journal)", s)
 }
 
+// Key names a note across kinds as "kind/id", e.g. "page/ideas". The
+// recent-notes list, pick lists and messages all use it.
+func Key(kind Kind, id string) string { return string(kind) + "/" + id }
+
+// Key is the note's "kind/id".
+func (n *Note) Key() string { return Key(n.Kind, n.ID) }
+
+// ParseKey splits a "kind/id" key.
+func ParseKey(k string) (Kind, string, error) {
+	kind, id, ok := strings.Cut(k, "/")
+	if !ok || id == "" {
+		return "", "", fmt.Errorf("%q is not kind/id", k)
+	}
+	pk, err := ParseKind(kind)
+	return pk, id, err
+}
+
+// GetKey loads the note a "kind/id" key names.
+func (s *Store) GetKey(k string) (*Note, error) {
+	kind, id, err := ParseKey(k)
+	if err != nil {
+		return nil, err
+	}
+	return s.Get(kind, id)
+}
+
 // JournalIDLayout is the filename layout for journal entries.
 const JournalIDLayout = "2006-01-02"
 

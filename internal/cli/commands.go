@@ -204,7 +204,7 @@ func rmCmd(a *App) *cobra.Command {
 		}
 		a.forgetRecent(n)
 		if a.jsonOut {
-			return a.printJSON(map[string]string{"deleted": string(n.Kind) + "/" + n.ID})
+			return a.printJSON(map[string]string{"deleted": n.Key()})
 		}
 		fmt.Fprintf(a.Out, "deleted %s/%s\n", n.Kind, n.ID)
 		return nil
