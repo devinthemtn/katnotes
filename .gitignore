@@ -7,3 +7,5 @@ katnotes-gui/frontend/dist/*
 !katnotes-gui/frontend/dist/.gitkeep
 katnotes-gui/frontend/bindings/
 .task/
+cmd/katnotes/*.syso
+katnotes-gui/build/windows/nsis/MicrosoftEdgeWebview2Setup.exe

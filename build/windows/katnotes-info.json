@@ -1,0 +1,16 @@
+{
+	"fixed": {
+		"file_version": "@VERSION@"
+	},
+	"info": {
+		"0409": {
+			"ProductVersion": "@VERSION@",
+			"CompanyName": "devinthemtn",
+			"FileDescription": "KatNotes command line and terminal app",
+			"LegalCopyright": "© 2026 devinthemtn",
+			"ProductName": "KatNotes",
+			"OriginalFilename": "katnotes.exe",
+			"InternalName": "katnotes"
+		}
+	}
+}

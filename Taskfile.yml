@@ -17,6 +17,8 @@ vars:
     sh: echo "$(go env GOPATH)/bin"
   EXE:
     sh: go env GOEXE
+  # Name of the WSL command that runs the Windows GUI (installed by install-windows).
+  WIN_WRAPPER: katnotes-win
 
 tasks:
   default:
@@ -39,6 +41,55 @@ tasks:
         msg: "wails3 not found: go install github.com/wailsapp/wails/v3/cmd/wails3@latest"
     cmds:
       - '{{.GUI_TASK}} build VERSION={{.VERSION}}'
+
+  # Cross-compiles both apps for Windows. Neither needs cgo there (the GUI
+  # uses WebView2), so no mingw toolchain is required.
+  build-windows:
+    desc: Build bin/katnotes.exe and katnotes-gui/bin/katnotes-gui.exe
+    vars:
+      # x.y.z of the last tag, for the exe's Windows file version.
+      WIN_FILE_VERSION:
+        sh: git describe --tags --abbrev=0 2>/dev/null | sed -n "s/^v\{0,1\}\([0-9]*\.[0-9]*\.[0-9]*\).*/\1/p" | grep . || echo 0.0.0
+    preconditions:
+      - sh: command -v wails3
+        msg: "wails3 not found: go install github.com/wailsapp/wails/v3/cmd/wails3@latest"
+    cmds:
+      # The CLI gets Windows version info, a manifest and the app icon, and is
+      # stripped like the GUI. Without them Windows Defender's machine-learning
+      # check flags it as Trojan:Win32/Bearfoos.A!ml and blocks it.
+      - mkdir -p {{.BIN_DIR}}
+      - sed "s/@VERSION@/{{.WIN_FILE_VERSION}}/g" build/windows/katnotes-info.json > {{.BIN_DIR}}/katnotes-info.json
+      - wails3 generate syso -arch amd64 -icon {{.GUI_DIR}}/build/windows/icon.ico -manifest build/windows/katnotes.exe.manifest -info {{.BIN_DIR}}/katnotes-info.json -out cmd/katnotes/rsrc_windows_amd64.syso
+      - defer: rm -f cmd/katnotes/rsrc_windows_amd64.syso
+      - CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -buildvcs=false -ldflags="-s -w {{.LDFLAGS}}" -o {{.BIN_DIR}}/katnotes.exe ./cmd/katnotes
+      - '{{.GUI_TASK}} windows:build VERSION={{.VERSION}} ARCH=amd64'
+
+  # The installer to hand out: bin/KatNotes-<version>-windows-amd64-setup.exe.
+  # It installs per user (no admin) into %LOCALAPPDATA%\Programs\katnotes:
+  # katnotes-gui.exe and katnotes.exe, Start Menu and desktop shortcuts, the
+  # folder on the user PATH, the WebView2 runtime if it's missing, and an
+  # uninstaller under Settings > Apps. Needs makensis (apt install nsis).
+  build-win-installer:
+    desc: Build the Windows installer, bin/KatNotes-<version>-windows-amd64-setup.exe (needs makensis)
+    deps: [build-windows]
+    vars:
+      WIN_FILE_VERSION:
+        sh: git describe --tags --abbrev=0 2>/dev/null | sed -n "s/^v\{0,1\}\([0-9]*\.[0-9]*\.[0-9]*\).*/\1/p" | grep . || echo 0.0.0
+      SETUP: '{{.BIN_DIR}}/KatNotes-{{.VERSION}}-windows-amd64-setup.exe'
+    preconditions:
+      - sh: command -v makensis
+        msg: "makensis not found: sudo apt install nsis"
+    cmds:
+      # The WebView2 bootstrapper the installer runs when the runtime is missing.
+      - wails3 generate webview2bootstrapper -dir {{.GUI_DIR}}/build/windows/nsis
+      - >-
+        cd {{.GUI_DIR}}/build/windows/nsis && makensis -V2
+        -DARG_WAILS_AMD64_BINARY="{{.ROOT_DIR}}/{{.GUI_DIR}}/bin/katnotes-gui.exe"
+        -DKATNOTES_CLI="{{.ROOT_DIR}}/{{.BIN_DIR}}/katnotes.exe"
+        -DINFO_PRODUCTVERSION={{.WIN_FILE_VERSION}}
+        -DOUTFILE="{{.ROOT_DIR}}/{{.SETUP}}"
+        project.nsi
+      - echo "Built {{.SETUP}}"
 
   dev-gui:
     desc: Run the GUI with hot reload
@@ -69,12 +120,49 @@ tasks:
     cmds:
       - npx svelte-check --tsconfig ./tsconfig.json
 
+  # In WSL this also runs install-windows, so the Windows versions and the
+  # katnotes-win wrapper stay in step with the Linux ones.
   install:
-    desc: Install katnotes and katnotes-gui into BINDIR (default $GOPATH/bin)
+    desc: Install katnotes and katnotes-gui into BINDIR (default $GOPATH/bin); in WSL, the Windows versions too
     deps: [build, build-gui]
     cmds:
       - install -m 755 {{.BIN_DIR}}/katnotes{{.EXE}} {{.BINDIR}}/
       - install -m 755 {{.GUI_DIR}}/bin/katnotes-gui{{.EXE}} {{.BINDIR}}/
+      - cmd: |
+          if grep -qi microsoft /proc/sys/kernel/osrelease 2>/dev/null && command -v cmd.exe >/dev/null; then
+            "{{.TASK_EXE}}" install-windows
+          fi
+        platforms: [linux]
+
+  # From WSL: copies katnotes.exe and katnotes-gui.exe to
+  # %LOCALAPPDATA%\Programs\katnotes, then build/windows/install.ps1 adds a
+  # Start Menu shortcut, puts that folder on the user PATH and points the
+  # Windows notes_dir at the WSL notes (only while it's still the default).
+  # Also installs BINDIR/$WIN_WRAPPER to start the Windows GUI from WSL.
+  install-windows:
+    desc: From WSL, install the Windows katnotes and katnotes-gui, plus the katnotes-win wrapper
+    platforms: [linux]
+    deps: [build, build-windows]
+    vars:
+      # Windows install dir, resolved through WSL interop (empty outside WSL).
+      WIN_INSTALL_DIR:
+        sh: '{{if .WIN_INSTALL_DIR}}echo "{{.WIN_INSTALL_DIR}}"{{else}}command -v wslpath >/dev/null && d=$(cd /mnt/c 2>/dev/null; cmd.exe /c echo %LOCALAPPDATA% 2>/dev/null | tr -d "\r") && [ -n "$d" ] && echo "$(wslpath "$d")/Programs/katnotes" || true{{end}}'
+    preconditions:
+      - sh: '[ -n "{{.WIN_INSTALL_DIR}}" ]'
+        msg: "not in WSL; set WIN_INSTALL_DIR"
+    cmds:
+      - install -Dm755 {{.BIN_DIR}}/katnotes.exe "{{.WIN_INSTALL_DIR}}/katnotes.exe"
+      - install -Dm755 {{.GUI_DIR}}/bin/katnotes-gui.exe "{{.WIN_INSTALL_DIR}}/katnotes-gui.exe"
+      # The Linux notes folder, as the Windows app sees it (\\wsl.localhost\...).
+      # PowerShell runs from C:, since it can't start in a WSL folder.
+      - cmd: |
+          notes=$("{{.ROOT_DIR}}/{{.BIN_DIR}}/katnotes" config show --json | sed -n 's/^ *"notes_dir": *"\(.*\)",\{0,1\}$/\1/p')
+          [ -n "$notes" ] && notes=$(wslpath -w "$notes")
+          ps1=$(wslpath -w "{{.ROOT_DIR}}/{{.GUI_DIR}}/build/windows/install.ps1")
+          dir=$(wslpath -w "{{.WIN_INSTALL_DIR}}")
+          cd /mnt/c && powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$ps1" -Dir "$dir" -NotesDir "$notes"
+      - sed "s|@EXE@|{{.WIN_INSTALL_DIR}}/katnotes-gui.exe|" {{.GUI_DIR}}/build/windows/katnotes-win.sh > {{.BIN_DIR}}/{{.WIN_WRAPPER}}
+      - install -m 755 {{.BIN_DIR}}/{{.WIN_WRAPPER}} {{.BINDIR}}/{{.WIN_WRAPPER}}
 
   clean:
     desc: Remove build output

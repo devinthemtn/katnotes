@@ -315,8 +315,32 @@ task build        # bin/katnotes
 task build-gui    # katnotes-gui/bin/katnotes-gui
 task dev-gui      # GUI with hot reload
 task test         # go test -tags gtk3 ./... and the frontend unit tests (npm test)
-task install      # both binaries into $GOPATH/bin
+task install      # both binaries into $GOPATH/bin; in WSL, the Windows versions too
+task build-windows    # bin/katnotes.exe and katnotes-gui/bin/katnotes-gui.exe
+task install-windows  # from WSL: the Windows part of task install on its own
+task build-win-installer  # bin/KatNotes-<version>-windows-amd64-setup.exe, to hand out
 ```
+
+### Windows installer
+
+`task build-win-installer` builds an installer for Windows users without any dev tools (it needs `makensis`: `sudo apt install nsis`). It installs for the current user without asking for admin rights, into `%LOCALAPPDATA%\Programs\katnotes`:
+
+- `katnotes-gui.exe` with Start Menu and desktop shortcuts, and `katnotes.exe` on the user's PATH;
+- the WebView2 runtime, if Windows doesn't already have it;
+- an uninstaller under Settings > Apps, which removes the programs and the PATH entry but leaves notes and settings.
+
+It also works silently: `setup.exe /S`, or `/S /D=C:\path` for another folder. The installer isn't code-signed, so Windows SmartScreen warns on first run ("More info" > "Run anyway").
+
+### Windows from WSL
+
+In WSL, `task install` also cross-compiles both apps for Windows (no extra toolchain needed) and runs `install-windows`, which:
+
+- copies `katnotes.exe` and `katnotes-gui.exe` to `%LOCALAPPDATA%\Programs\katnotes`;
+- adds a **KatNotes** Start Menu shortcut, and puts that folder on your Windows PATH so `katnotes` works in PowerShell and cmd;
+- points the Windows `notes_dir` at your WSL notes (`\\wsl.localhost\<distro>\…`), so both versions share one set of notes. This only happens while the Windows config still uses the default folder and that folder has no notes; the Windows app otherwise keeps its own config in `%APPDATA%\katnotes`, since Linux settings like `emacsclient` don't work there;
+- installs `katnotes-win` into `$GOPATH/bin`, which starts the Windows GUI from the WSL terminal without holding the shell.
+
+Set `WIN_INSTALL_DIR` to install somewhere else.
 
 ## Layout
 

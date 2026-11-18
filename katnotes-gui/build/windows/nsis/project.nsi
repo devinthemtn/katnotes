@@ -31,9 +31,36 @@ Unicode true
 ## !define REQUEST_EXECUTION_LEVEL "admin"            # Default "admin"  see also https://nsis.sourceforge.io/Docs/Chapter4.html
 ## !define WAILS_INSTALL_SCOPE     "user"             # Default "machine" - set to "user" for per-user install ($LOCALAPPDATA) without UAC prompt
 ####
+## KatNotes installs per user (no admin prompt) into %LOCALAPPDATA%\Programs\katnotes,
+## the same place `task install-windows` uses. `ifndef` so -D can still override.
+!ifndef REQUEST_EXECUTION_LEVEL
+    !define REQUEST_EXECUTION_LEVEL "user"
+!endif
+!ifndef WAILS_INSTALL_SCOPE
+    !define WAILS_INSTALL_SCOPE "user"
+!endif
+!define UNINST_KEY_NAME "KatNotes"
+####
 ## Include the wails tools
 ####
 !include "wails_tools.nsh"
+
+# KATNOTES_CLI is the path to katnotes.exe (the command line and terminal app),
+# installed next to the GUI; `task build-win-installer` passes it with -D.
+!ifndef KATNOTES_CLI
+    !error "Pass -DKATNOTES_CLI=<path to katnotes.exe>"
+!endif
+!ifndef OUTFILE
+    !define OUTFILE "..\..\..\bin\${INFO_PROJECTNAME}-${ARCH}-installer.exe"
+!endif
+
+# Puts $INSTDIR on (or takes it off) the user's PATH, so katnotes works in
+# PowerShell and cmd. PowerShell does the list editing and tells Windows
+# the environment changed.
+!macro katnotes.path ACTION
+    nsExec::ExecToLog `powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$$d = '$INSTDIR'; $$p = @([Environment]::GetEnvironmentVariable('Path', 'User') -split ';' | Where-Object { $$_ -and $$_ -ne $$d }); if ('${ACTION}' -eq 'add') { $$p += $$d }; [Environment]::SetEnvironmentVariable('Path', ($$p -join ';'), 'User')"`
+    Pop $0
+!macroend
 
 # The version information for this two must consist of 4 parts
 VIProductVersion "${INFO_PRODUCTVERSION}.0"
@@ -72,9 +99,9 @@ ManifestDPIAware true
 #!finalize 'signtool --file "%1"'
 
 Name "${INFO_PRODUCTNAME}"
-OutFile "..\..\..\bin\${INFO_PROJECTNAME}-${ARCH}-installer.exe" # Name of the installer's file.
+OutFile "${OUTFILE}" # Name of the installer's file.
 !if "${WAILS_INSTALL_SCOPE}" == "user"
-    InstallDir "$LOCALAPPDATA\Programs\${INFO_PRODUCTNAME}"
+    InstallDir "$LOCALAPPDATA\Programs\katnotes"
 !else
     InstallDir "$PROGRAMFILES64\${INFO_COMPANYNAME}\${INFO_PRODUCTNAME}"
 !endif
@@ -92,6 +119,8 @@ Section
     SetOutPath $INSTDIR
     
     !insertmacro wails.files
+    File "/oname=katnotes.exe" "${KATNOTES_CLI}"
+    !insertmacro katnotes.path add
 
     CreateShortcut "$SMPROGRAMS\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
     CreateShortCut "$DESKTOP\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
@@ -107,6 +136,9 @@ Section "uninstall"
 
     RMDir /r "$AppData\${PRODUCT_EXECUTABLE}" # Remove the WebView2 DataPath
 
+    !insertmacro katnotes.path remove
+
+    # Only the programs: notes and %APPDATA%\katnotes (config, themes) stay.
     RMDir /r $INSTDIR
 
     Delete "$SMPROGRAMS\${INFO_PRODUCTNAME}.lnk"
