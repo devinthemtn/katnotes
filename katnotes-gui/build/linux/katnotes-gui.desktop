@@ -1,10 +1,12 @@
 [Desktop Entry]
 Type=Application
-Name=katnotes-gui
+Name=KatNotes
+GenericName=Notes
+Comment=Personal Markdown notes: pages and a daily journal
 Exec=katnotes-gui
 Icon=katnotes-gui
-Categories=Development;
+Categories=Office;Utility;
+Keywords=notes;markdown;journal;tasks;
 Terminal=false
-Keywords=wails
-Version=1.0
 StartupNotify=false
+StartupWMClass=katnotes-gui

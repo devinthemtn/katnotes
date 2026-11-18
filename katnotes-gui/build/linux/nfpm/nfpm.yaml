@@ -12,7 +12,7 @@ priority: "extra"
 maintainer: ${GIT_COMMITTER_NAME} <${GIT_COMMITTER_EMAIL}>
 description: "Personal Markdown notes"
 vendor: "devinthemtn"
-homepage: "https://wails.io"
+homepage: "https://github.com/devinthemtn/katnotes"
 license: "MIT"
 release: "1"
 
