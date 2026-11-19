@@ -13,6 +13,9 @@ import (
 var version = "dev"
 
 func main() {
+	if fromExplorer() {
+		return
+	}
 	if version == "dev" {
 		if bi, ok := debug.ReadBuildInfo(); ok && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
 			version = bi.Main.Version
