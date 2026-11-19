@@ -37,8 +37,8 @@ type Info struct {
 // NewNotesService loads the config and prepares the notes directory.
 func NewNotesService() (*NotesService, error) {
 	s := &NotesService{}
-	if dir, err := commandsDir(); err == nil {
-		luacmd.WriteExample(dir) //nolint:errcheck // the example is a convenience
+	if d, err := config.Dir(); err == nil {
+		luacmd.WriteExamples(d) //nolint:errcheck // the examples are a convenience
 	}
 	if dir := commands.TemplatesDir(); dir != "" {
 		notes.WriteExampleTemplate(dir) //nolint:errcheck // the example is a convenience
@@ -406,12 +406,14 @@ func (s *NotesService) ReloadConfig() (config.Config, error) {
 	return s.cfg, nil
 }
 
-func commandsDir() (string, error) {
+// slashDir is the folder of the "/" editor commands. (":" commands are
+// found by internal/commands.)
+func slashDir() (string, error) {
 	d, err := config.Dir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(d, luacmd.DirName), nil
+	return filepath.Join(d, luacmd.SlashDirName), nil
 }
 
 // SlashList is the user's Lua commands plus any files that failed to load.
@@ -424,7 +426,7 @@ type SlashList struct {
 // Errors without hiding the commands that loaded.
 func (s *NotesService) SlashCommands() (SlashList, error) {
 	out := SlashList{Commands: []luacmd.Command{}, Errors: []string{}}
-	dir, err := commandsDir()
+	dir, err := slashDir()
 	if err != nil {
 		return out, err
 	}
@@ -438,10 +440,12 @@ func (s *NotesService) SlashCommands() (SlashList, error) {
 
 // RunSlash runs one user Lua command for the open note.
 func (s *NotesService) RunSlash(name string, ctx luacmd.Context) (luacmd.Result, error) {
-	dir, err := commandsDir()
+	dir, err := slashDir()
 	if err != nil {
 		return luacmd.Result{}, err
 	}
+	// "/name" always runs as a slash command, with the short time limit.
+	ctx.Source, ctx.App, ctx.Args = luacmd.SourceSlash, commands.AppGUI, ""
 	s.mu.Lock()
 	ctx.NotesDir = s.store.Root
 	if k, err := notes.ParseKind(ctx.Note.Kind); err == nil && ctx.Note.ID != "" {

@@ -133,7 +133,7 @@
   let slashQ = $state('');
   let slashSel = $state(0);
   let slashPos = $state({ left: 0, top: 0, above: false });
-  // Built-in plus user Lua commands (~/.config/katnotes/commands/*.lua).
+  // Built-in plus user Lua commands (~/.config/katnotes/slash/*.lua).
   let allSlash: SlashCommand[] = $state(SLASH);
   let slashItems = $derived(slashOpen ? matchSlash(slashQ, allSlash).slice(0, 6) : []);
 
@@ -221,7 +221,7 @@
       [`${modLabel}+S`, 'Save now (notes also autosave as you type)'],
       ['Enter', 'In the title field: rename the note'],
       ['/', `In the editor: slash commands (${SLASH.map((c) => c.name).join(', ')})`],
-      ['/your-command', 'Lua commands from ~/.config/katnotes/commands/*.lua (:reload after editing)'],
+      ['/your-command', 'Lua commands from ~/.config/katnotes/slash/*.lua (:reload after editing)'],
       [`${modLabel}+Enter`, 'In the editor: make the line a task, or check/uncheck it'],
       [`${modLabel}+Shift+K`, 'In the editor: delete the line (or every line in the selection)'],
       ['Enter', 'On a list item or task: continue the list below; on an empty one: remove it'],
@@ -662,6 +662,15 @@
     }
   }
 
+  // The ":" catalog: built-ins plus the user's Lua commands.
+  async function loadCmdCatalog() {
+    try {
+      cmdCatalog = ((await api.Commands()) ?? []).filter((x): x is CmdSpec => !!x);
+    } catch {
+      /* the palette still runs commands; it just can't tell which are slow */
+    }
+  }
+
   async function reloadConfig() {
     try {
       const c = await api.ReloadConfig();
@@ -671,6 +680,7 @@
       setStampDone(c.task_done_date !== false);
       if (settingsOpen) cfg = c;
       await loadUserSlash(true);
+      await loadCmdCatalog();
       await loadInfo();
       await refreshList();
       flash('config reloaded');
@@ -1641,6 +1651,9 @@
         note: { kind: note.kind, id: note.id, title: draftTitle, tags: parseTags(draftTags), path: '' },
         notes_dir: '',
         config_dir: '',
+        source: 'slash', // the Go side sets source, app and notes_dir itself
+        app: 'gui',
+        args: '',
       });
       // The script ran asynchronously: only apply it if nothing moved underneath.
       if (!current || keyOf(current) !== keyOf(note) || !bodyEl || bodyEl.value.slice(l.start, l.end) !== l.text) {
@@ -1749,7 +1762,7 @@
     loadMetaStats();
     loadLinkTargets();
     loadViewState().then(refreshList).then(openStartPage);
-    api.Commands().then((c) => { cmdCatalog = (c ?? []).filter((x): x is CmdSpec => !!x); }).catch(() => {});
+    loadCmdCatalog();
     window.addEventListener('focus', onFocus);
     applyTheme();
     darkQuery.addEventListener('change', applyTheme);

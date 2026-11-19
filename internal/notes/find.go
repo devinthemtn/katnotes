@@ -2,7 +2,6 @@ package notes
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -106,14 +105,18 @@ func findName(all []Note, pattern string) []Match {
 		}
 	}
 	out := make([]Match, 0, len(best))
-	for i, h := range best {
+	for i := range all { // in list order, so equal matches keep it
+		h, ok := best[i]
+		if !ok {
+			continue
+		}
 		out = append(out, Match{Note: all[i], TitleMatch: true, Lines: []LineMatch{}, NameHits: h.runes, rank: h.score})
 	}
-	sort.SliceStable(out, func(i, j int) bool {
+	sortByIndex(out, func(i, j int) int {
 		if out[i].rank != out[j].rank {
-			return out[i].rank > out[j].rank
+			return out[j].rank - out[i].rank
 		}
-		return out[i].Note.Updated.After(out[j].Note.Updated)
+		return out[j].Note.Updated.Compare(out[i].Note.Updated)
 	})
 	return out
 }
@@ -191,7 +194,7 @@ func findText(all []Note, text string) []Match {
 	for _, n := range all {
 		title := strings.ToLower(n.Title)
 		tags := strings.Join(n.Tags, " ")
-		body := strings.ToLower(n.Body)
+		body := n.lowerBody()
 		ok := true
 		for _, t := range terms {
 			tt := strings.TrimPrefix(t, "#")
@@ -208,12 +211,20 @@ func findText(all []Note, text string) []Match {
 			m.TitleMatch = m.TitleMatch || strings.Contains(title, t)
 			m.TagMatch = m.TagMatch || strings.Contains(tags, strings.TrimPrefix(t, "#"))
 		}
-		for i, line := range strings.Split(n.Body, "\n") {
-			l := strings.ToLower(line)
+		// Lowercasing never adds or removes a newline, so the lines of the
+		// lowercased body line up with the body's.
+		var lines []string
+		rest := body
+		for i := 0; rest != ""; i++ {
+			l, after, _ := strings.Cut(rest, "\n")
+			rest = after
 			for _, t := range terms {
 				if strings.Contains(l, t) {
 					if len(m.Lines) < maxLinesPerMatch {
-						m.Lines = append(m.Lines, LineMatch{Line: i + 1, Text: strings.TrimSpace(line)})
+						if lines == nil {
+							lines = strings.Split(n.Body, "\n")
+						}
+						m.Lines = append(m.Lines, LineMatch{Line: i + 1, Text: strings.TrimSpace(lines[i])})
 					}
 					m.rank++
 					break
@@ -222,6 +233,6 @@ func findText(all []Note, text string) []Match {
 		}
 		out = append(out, m)
 	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].score() > out[j].score() })
+	sortByIndex(out, func(i, j int) int { return out[j].score() - out[i].score() })
 	return out
 }

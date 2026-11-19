@@ -283,7 +283,7 @@ func (s *Store) MetaStats() ([]MetaKeyStat, error) {
 	keys := map[string]int{}
 	vals := map[string]map[string]int{}
 	for _, n := range ns {
-		for _, t := range ParseTasks(n.Body) {
+		for _, t := range n.tasks() {
 			for k, v := range t.Meta {
 				keys[k]++
 				if k == MetaDue || k == MetaStart || k == MetaDone {

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"regexp"
-	"sort"
 	"strings"
 	"time"
 )
@@ -94,7 +93,7 @@ func (s *Store) Tasks(kind Kind) ([]NoteTasks, error) {
 	}
 	var out []NoteTasks
 	for _, n := range ns {
-		ts := ParseTasks(n.Body)
+		ts := n.tasks()
 		if len(ts) == 0 {
 			continue
 		}
@@ -108,11 +107,11 @@ func (s *Store) Tasks(kind Kind) ([]NoteTasks, error) {
 		}
 		out = append(out, nt)
 	}
-	sort.SliceStable(out, func(i, j int) bool {
+	sortByIndex(out, func(i, j int) int {
 		if out[i].Open != out[j].Open {
-			return out[i].Open > out[j].Open
+			return out[j].Open - out[i].Open
 		}
-		return out[i].Note.Updated.After(out[j].Note.Updated)
+		return out[j].Note.Updated.Compare(out[i].Note.Updated)
 	})
 	return out, nil
 }
@@ -244,7 +243,7 @@ func (s *Store) SyncTaskFlags(dryRun bool) ([]TaskFlagChange, error) {
 	var out []TaskFlagChange
 	for i := range ns {
 		n := &ns[i]
-		want := HasTask(n.Body)
+		want := len(n.tasks()) > 0
 		v, present := n.Extra[TaskKey]
 		if (want && v == true) || (!want && !present) {
 			continue
@@ -352,7 +351,7 @@ func (s *Store) AllTasks(f TaskFilter) ([]TaskRef, error) {
 	}
 	var out []TaskRef
 	for _, n := range ns {
-		for _, t := range ParseTasks(n.Body) {
+		for _, t := range n.tasks() {
 			if f.Match(t) {
 				out = append(out, TaskRef{Note: n, Task: t})
 			}
@@ -365,24 +364,32 @@ func (s *Store) AllTasks(f TaskFilter) ([]TaskRef, error) {
 // SortTasks orders tasks by due date (undated last), priority (highest
 // first), the note's updated time (newest first) and then line.
 func SortTasks(ts []TaskRef) {
-	sort.SliceStable(ts, func(i, j int) bool {
-		a, b := ts[i], ts[j]
-		da, db := a.Task.Meta[MetaDue], b.Task.Meta[MetaDue]
+	due := make([]string, len(ts))
+	pri := make([]int, len(ts))
+	for i := range ts {
+		due[i], pri[i] = ts[i].Task.Meta[MetaDue], ts[i].Task.Priority()
+	}
+	sortByIndex(ts, func(i, j int) int {
+		a, b := &ts[i], &ts[j]
+		da, db := due[i], due[j]
 		if da != db {
-			if da == "" || db == "" {
-				return db == ""
+			if da == "" {
+				return 1
 			}
-			return da < db
+			if db == "" {
+				return -1
+			}
+			return strings.Compare(da, db)
 		}
-		if pa, pb := a.Task.Priority(), b.Task.Priority(); pa != pb {
-			return pa > pb
+		if pa, pb := pri[i], pri[j]; pa != pb {
+			return pb - pa
 		}
-		if !a.Note.Updated.Equal(b.Note.Updated) {
-			return a.Note.Updated.After(b.Note.Updated)
+		if c := b.Note.Updated.Compare(a.Note.Updated); c != 0 {
+			return c
 		}
-		if a.Note.Path != b.Note.Path {
-			return a.Note.Path < b.Note.Path
+		if c := strings.Compare(a.Note.Path, b.Note.Path); c != 0 {
+			return c
 		}
-		return a.Task.Line < b.Task.Line
+		return a.Task.Line - b.Task.Line
 	})
 }

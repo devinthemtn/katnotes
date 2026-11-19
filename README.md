@@ -13,7 +13,8 @@ Every frontend goes through the same `internal/notes` package, so they all read 
 |---|---|
 | Notes | `~/KatNotes/pages/<slug>.md` and `~/KatNotes/journal/YYYY-MM-DD.md` |
 | Options | `$XDG_CONFIG_HOME/katnotes/config.toml` (usually `~/.config/katnotes/config.toml`) |
-| Lua `/` commands (GUI) | `~/.config/katnotes/commands/<name>.lua` |
+| Lua `/` commands (GUI editor) | `~/.config/katnotes/slash/<name>.lua` |
+| Lua `:` commands (TUI and GUI command window) | `~/.config/katnotes/commands/<name>.lua` |
 | Page templates | `~/.config/katnotes/templates/<name>.md` (an example `meeting.md` is written on first run) |
 | Colour themes | `~/.config/katnotes/themes/<name>.toml` (`light.toml` and `dark.toml` are written on first run), shared by the TUI and the GUI |
 | Command history, recent notes | `~/.config/katnotes/command_history` and `~/.config/katnotes/recent`, shared by the TUI and the GUI |
@@ -93,7 +94,7 @@ Both apps have the same search with three modes. In the TUI, `/` opens a live se
 - **Saved searches:** `:search save <name>` keeps the current search. It appears with 🔎 at the top of the Tags tab, and `:search <name>` runs it again.
 - **Problem files:** a file whose frontmatter can't be read (often an imported one) is still listed, marked ⚠, with the whole file as its body. `:frontmatter` fixes it.
 
-Notes are cached by file time and size, so lists and searches stay quick with thousands of files. Edits made outside the apps are picked up.
+Notes are cached by file time and size, along with their parsed links and tasks, so lists, searches, backlinks and the task views stay quick with thousands of files (about 20–60 ms at 10,000 notes). Edits made outside the apps are picked up.
 
 ## Tasks
 
@@ -262,15 +263,31 @@ The keys in backticks (`/`, `:`, `J`, `?`) are the TUI's, and work when you're n
 
 ### Lua commands
 
-Each `<name>.lua` file in `~/.config/katnotes/commands/` becomes a `/name` command in the GUI editor (gopher-lua, standard library available, 2 s limit per run). A commented `_example.lua` is created there on first launch; files starting with `_` are ignored.
+KatNotes runs your own commands written in Lua (gopher-lua, standard library available). There are two kinds, each in its own folder of the config directory, and each folder gets a commented `_example.lua` on first launch. Files starting with `_` are ignored, and names may use `a-z`, `0-9`, `_` and `-`.
+
+**`/` commands** (`~/.config/katnotes/slash/<name>.lua`) work in the GUI editor: typing `/name` runs the script and puts what it returns into the note. They are stopped after 2 s, so typing never stalls. After editing one, run `:reload`.
 
 ```lua
--- ~/.config/katnotes/commands/sig.lua
+-- ~/.config/katnotes/slash/sig.lua
 return {
   description = "Insert my signature",
   run = function(ctx)   -- ctx: line, before, after, body, note{kind,id,title,tags,path}, notes_dir, config_dir
     return "— me, " .. os.date("%Y-%m-%d")   -- text replaces /sig; nil removes it;
   end,                                          -- { line = "…", cursor = n } replaces the line
+}
+```
+
+**`:` commands** (`~/.config/katnotes/commands/<name>.lua`) join the built-in commands in the command window of both apps, as `:name [args…]`, with completion and help. The script gets the typed text as `ctx.args`, plus `app`, `body`, `note`, `notes_dir` and `config_dir` for the selected or open note. Returned text (or `{ status = "…" }`) is shown as a message, `{ open = "page/id" }` goes to that note, and the note list reloads afterwards, so scripts can write notes. They are stopped after 2 s unless they set `timeout = <seconds>` (up to 300); `long = true` runs them in the background like `:sync`. A file named like a built-in command (`sync.lua`) is ignored.
+
+```lua
+-- ~/.config/katnotes/commands/wordcount.lua
+return {
+  description = "Count the words in the note",
+  run = function(ctx)
+    local n = 0
+    for _ in ctx.body:gmatch("%S+") do n = n + 1 end
+    return ctx.note.title .. ": " .. n .. " words"
+  end,
 }
 ```
 

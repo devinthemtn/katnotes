@@ -19,7 +19,9 @@ import (
 
 	"github.com/devinthemtn/katnotes/internal/cli"
 	"github.com/devinthemtn/katnotes/internal/commands"
+	"github.com/devinthemtn/katnotes/internal/config"
 	"github.com/devinthemtn/katnotes/internal/editor"
+	"github.com/devinthemtn/katnotes/internal/luacmd"
 	"github.com/devinthemtn/katnotes/internal/notes"
 	"github.com/devinthemtn/katnotes/internal/recent"
 	"github.com/devinthemtn/katnotes/internal/theme"
@@ -37,6 +39,9 @@ func Run(app *cli.App) error {
 	}
 	if dir := commands.TemplatesDir(); dir != "" {
 		notes.WriteExampleTemplate(dir) //nolint:errcheck // the example is a convenience
+	}
+	if d, err := config.Dir(); err == nil {
+		luacmd.WriteExamples(d) //nolint:errcheck // the examples are a convenience
 	}
 	m := newModel(app, style)
 	if themeErr != nil {

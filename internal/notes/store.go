@@ -9,8 +9,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
+	"runtime"
+	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"text/template"
 	"time"
 	"unicode"
@@ -103,6 +106,8 @@ type Note struct {
 	// written to (see FileStamp). Unlike Updated, which an updated: field
 	// in the frontmatter overrides, it changes whenever the file does.
 	Stamp string `json:"stamp,omitempty"`
+
+	d *derived // links, tasks and lowercased body (see cache.go)
 }
 
 // FileStamp identifies one version of a file: its modification time and
@@ -261,6 +266,7 @@ func (s *Store) load(kind Kind, id, path string) (*Note, error) {
 	}
 	n.Snippet = snippet(n.Body)
 	n.Stamp = FileStamp(fi)
+	n.d = &derived{body: n.Body}
 	s.cache.put(path, fi, n)
 	return n, nil
 }
@@ -322,15 +328,21 @@ type ListOpts struct {
 	Sort SortBy
 }
 
-// List returns all notes of a kind. An empty kind lists every kind.
+// List returns all notes of a kind. An empty kind lists every kind. A file
+// deleted while the folder is being read is left out, not an error.
 func (s *Store) List(kind Kind, opts ListOpts) ([]Note, error) {
 	kinds := Kinds
 	if kind != "" {
 		kinds = []Kind{kind}
 	}
-	var out []Note
+	type file struct {
+		kind     Kind
+		id, path string
+	}
+	var files []file
 	for _, k := range kinds {
-		entries, err := os.ReadDir(filepath.Join(s.Root, k.Dir()))
+		dir := filepath.Join(s.Root, k.Dir())
+		entries, err := os.ReadDir(dir)
 		if errors.Is(err, os.ErrNotExist) {
 			continue
 		}
@@ -348,18 +360,59 @@ func (s *Store) List(kind Kind, opts ListOpts) ([]Note, error) {
 					continue
 				}
 			}
-			n, err := s.load(k, id, filepath.Join(s.Root, k.Dir(), name))
-			if err != nil {
-				return nil, err
-			}
-			if opts.Tag != "" && !n.HasTag(opts.Tag) {
-				continue
-			}
-			out = append(out, *n)
+			files = append(files, file{k, id, filepath.Join(dir, name)})
 		}
+	}
+
+	// Load (stat, and parse what the cache doesn't have) in parallel: with
+	// thousands of notes the file system calls dominate.
+	loaded := make([]*Note, len(files))
+	errs := make([]error, len(files))
+	parallel(len(files), func(i int) {
+		f := files[i]
+		loaded[i], errs[i] = s.load(f.kind, f.id, f.path)
+	})
+	out := make([]Note, 0, len(files))
+	for i, n := range loaded {
+		if errors.Is(errs[i], ErrNotFound) {
+			continue // deleted since ReadDir
+		}
+		if errs[i] != nil {
+			return nil, errs[i]
+		}
+		if opts.Tag != "" && !n.HasTag(opts.Tag) {
+			continue
+		}
+		out = append(out, *n)
 	}
 	sortNotes(out, kind, opts.Sort)
 	return out, nil
+}
+
+// parallel runs f(0) … f(n-1) on a few goroutines and waits for them all.
+// Small jobs run inline.
+func parallel(n int, f func(i int)) {
+	workers := min(runtime.NumCPU(), 8, n/64)
+	if workers < 2 {
+		for i := range n {
+			f(i)
+		}
+		return
+	}
+	var next atomic.Int64
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Go(func() {
+			for {
+				i := int(next.Add(1)) - 1
+				if i >= n {
+					return
+				}
+				f(i)
+			}
+		})
+	}
+	wg.Wait()
 }
 
 func sortNotes(ns []Note, kind Kind, by SortBy) {
@@ -369,22 +422,57 @@ func sortNotes(ns []Note, kind Kind, by SortBy) {
 			by = SortID
 		}
 	}
-	sort.SliceStable(ns, func(i, j int) bool {
-		a, b := ns[i], ns[j]
-		if pa, pb := a.Pinned(), b.Pinned(); pa != pb {
-			return pa // pinned notes first, whatever the order
+	var titles []string
+	if by == SortTitle {
+		titles = make([]string, len(ns))
+		for i := range ns {
+			titles[i] = strings.ToLower(ns[i].Title)
 		}
+	}
+	pinned := make([]bool, len(ns))
+	for i := range ns {
+		pinned[i] = ns[i].Pinned()
+	}
+	sortByIndex(ns, func(i, j int) int {
+		if pinned[i] != pinned[j] {
+			if pinned[i] {
+				return -1 // pinned notes first, whatever the order
+			}
+			return 1
+		}
+		a, b := &ns[i], &ns[j]
 		switch by {
 		case SortTitle:
-			return strings.ToLower(a.Title) < strings.ToLower(b.Title)
+			return strings.Compare(titles[i], titles[j])
 		case SortID:
-			return a.ID > b.ID
+			return strings.Compare(b.ID, a.ID)
 		case SortCreated:
-			return a.Created.After(b.Created)
+			return b.Created.Compare(a.Created)
 		default:
-			return a.Updated.After(b.Updated)
+			return b.Updated.Compare(a.Updated)
 		}
 	})
+}
+
+// sortByIndex stably sorts s by cmp, which compares the elements at two
+// indexes of s as it was before sorting. It moves each element once instead
+// of swapping large structs (notes) many times over.
+func sortByIndex[T any](s []T, cmp func(i, j int) int) {
+	idx := make([]int, len(s))
+	for i := range idx {
+		idx[i] = i
+	}
+	slices.SortFunc(idx, func(i, j int) int {
+		if c := cmp(i, j); c != 0 {
+			return c
+		}
+		return i - j // ties keep their order
+	})
+	sorted := make([]T, len(s))
+	for to, from := range idx {
+		sorted[to] = s[from]
+	}
+	copy(s, sorted)
 }
 
 // FindByID returns every note whose ID is id, across all kinds.

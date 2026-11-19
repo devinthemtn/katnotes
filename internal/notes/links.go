@@ -6,7 +6,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"regexp"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 )
@@ -192,16 +192,20 @@ func (s *Store) Backlinks(kind Kind, id string) ([]Backlink, error) {
 	if err != nil {
 		return nil, err
 	}
+	parseAllLinks(ns)
 	out := []Backlink{}
 	for _, n := range ns {
 		if n.Kind == kind && n.ID == id {
 			continue
 		}
 		var lines []LineMatch
+		var body []string
 		last := -1
-		body := strings.Split(n.Body, "\n")
-		for _, l := range ParseLinks(&n) {
+		for _, l := range n.links() {
 			if l.Kind == kind && l.ID == id && l.Line != last {
+				if body == nil {
+					body = strings.Split(n.Body, "\n")
+				}
 				lines = append(lines, LineMatch{Line: l.Line + 1, Text: strings.TrimSpace(body[l.Line])})
 				last = l.Line
 			}
@@ -211,7 +215,7 @@ func (s *Store) Backlinks(kind Kind, id string) ([]Backlink, error) {
 			out = append(out, Backlink{Note: n, Lines: lines})
 		}
 	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].Note.Updated.After(out[j].Note.Updated) })
+	sortByIndex(out, func(i, j int) int { return out[j].Note.Updated.Compare(out[i].Note.Updated) })
 	return out, nil
 }
 
@@ -223,10 +227,14 @@ func (s *Store) rewriteLinks(kind Kind, oldID, newID, oldTitle, newTitle string)
 	if err != nil {
 		return nil, err
 	}
+	parseAllLinks(ns)
 	var changed []string
 	for i := range ns {
 		n := &ns[i]
-		links := ParseLinks(n)
+		links := n.links()
+		if !slices.ContainsFunc(links, func(l Link) bool { return l.Kind == kind && l.ID == oldID }) {
+			continue
+		}
 		lines := strings.Split(n.Body, "\n")
 		touched := false
 		// Right to left, so earlier offsets on the same line stay valid.

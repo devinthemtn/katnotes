@@ -1,6 +1,8 @@
-// Package luacmd runs user-defined editor commands written in Lua
-// (gopher-lua). Each command is one file, <dir>/<name>.lua, that returns a
-// table with a description and a run(ctx) function. See ExampleScript.
+// Package luacmd runs user-defined commands written in Lua (gopher-lua).
+// Each command is one file, <dir>/<name>.lua, that returns a table with a
+// description and a run(ctx) function. "/" editor commands and ":" command
+// window commands live in separate folders (SlashDirName, CommandDirName);
+// see SlashExample and CommandExample.
 package luacmd
 
 import (
@@ -18,11 +20,25 @@ import (
 	lua "github.com/yuin/gopher-lua"
 )
 
-// DirName is the commands folder inside the KatNotes config directory.
-const DirName = "commands"
+// Folders inside the KatNotes config directory.
+const (
+	SlashDirName   = "slash"    // "/name" commands in the GUI editor
+	CommandDirName = "commands" // ":name" commands in the TUI and GUI command window
+)
 
-// Timeout bounds loading or running one script.
+// Timeout bounds loading or running one script. A script can ask for more
+// when it runs from the ":" command window (timeout = seconds), up to
+// MaxTimeout; "/" commands always use Timeout, so typing never stalls.
 var Timeout = 2 * time.Second
+
+// MaxTimeout caps a script's own timeout.
+var MaxTimeout = 5 * time.Minute
+
+// Where a command was run from (Context.Source).
+const (
+	SourceSlash   = "slash"   // "/name" in the GUI editor
+	SourceCommand = "command" // ":name args" in the TUI or GUI command window
+)
 
 var validName = regexp.MustCompile(`^[a-z0-9_-]+$`)
 
@@ -31,6 +47,12 @@ type Command struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Path        string `json:"path"`
+	// Long is the script's "long = true": from the command window it runs in
+	// the background, like :sync.
+	Long bool `json:"long"`
+	// Timeout is the script's "timeout" (seconds) for command-window runs;
+	// zero means Timeout.
+	Timeout time.Duration `json:"timeout"`
 }
 
 // NoteInfo describes the open note.
@@ -51,16 +73,23 @@ type Context struct {
 	Note      NoteInfo `json:"note"`
 	NotesDir  string   `json:"notes_dir"`
 	ConfigDir string   `json:"config_dir"`
+	Source    string   `json:"source"` // SourceSlash or SourceCommand ("" counts as slash)
+	App       string   `json:"app"`    // "tui" or "gui"
+	Args      string   `json:"args"`   // command window: the text after the name
 }
 
 // Result is what run returned. Kind "text" replaces the /name token with
 // Text; Kind "line" replaces the whole line with Line and puts the cursor at
-// Cursor (-1 means end of line).
+// Cursor (-1 means end of line). Status and Open are for the command window:
+// a message to show and a note ("page/id", "journal/2026-11-20" or a title)
+// to go to.
 type Result struct {
 	Kind   string `json:"kind"`
 	Text   string `json:"text"`
 	Line   string `json:"line"`
 	Cursor int    `json:"cursor"`
+	Status string `json:"status"`
+	Open   string `json:"open"`
 }
 
 type cached struct {
@@ -122,11 +151,26 @@ func loadCached(path, name string) (Command, error) {
 }
 
 // newState returns a Lua state with the standard libraries and a deadline.
-func newState() (*lua.LState, context.CancelFunc) {
-	L := lua.NewState()
+// extend replaces the deadline with a new one, d from now.
+func newState() (L *lua.LState, extend func(d time.Duration), done func()) {
+	L = lua.NewState()
 	ctx, cancel := context.WithTimeout(context.Background(), Timeout)
 	L.SetContext(ctx)
-	return L, func() { cancel(); L.Close() }
+	extend = func(d time.Duration) {
+		cancel()
+		ctx, cancel = context.WithTimeout(context.Background(), d)
+		L.SetContext(ctx)
+	}
+	return L, extend, func() { cancel(); L.Close() }
+}
+
+// options reads long and timeout from a command's table.
+func options(tbl *lua.LTable) (long bool, timeout time.Duration) {
+	long = lua.LVAsBool(tbl.RawGetString("long"))
+	if n, ok := tbl.RawGetString("timeout").(lua.LNumber); ok && n > 0 {
+		timeout = min(time.Duration(float64(n)*float64(time.Second)), MaxTimeout)
+	}
+	return long, timeout
 }
 
 // module runs the file and returns the table it returns.
@@ -145,17 +189,18 @@ func module(L *lua.LState, path string) (*lua.LTable, error) {
 }
 
 func load(path, name string) (Command, error) {
-	L, done := newState()
+	L, _, done := newState()
 	defer done()
 	tbl, err := module(L, path)
 	if err != nil {
 		return Command{}, err
 	}
+	long, timeout := options(tbl)
 	desc := ""
 	if d, ok := tbl.RawGetString("description").(lua.LString); ok {
 		desc = string(d)
 	}
-	return Command{Name: name, Description: desc, Path: path}, nil
+	return Command{Name: name, Description: desc, Path: path, Long: long, Timeout: timeout}, nil
 }
 
 // Run executes the named command from dir.
@@ -167,11 +212,14 @@ func Run(dir, name string, c Context) (Result, error) {
 	if _, err := os.Stat(path); err != nil {
 		return Result{}, fmt.Errorf("no command %q in %s", name, dir)
 	}
-	L, done := newState()
+	L, extend, done := newState()
 	defer done()
 	tbl, err := module(L, path)
 	if err != nil {
 		return Result{}, err
+	}
+	if _, timeout := options(tbl); timeout > 0 && c.Source == SourceCommand {
+		extend(timeout)
 	}
 	if err := L.CallByParam(lua.P{Fn: tbl.RawGetString("run"), NRet: 1, Protect: true}, contextTable(L, c)); err != nil {
 		return Result{}, scriptErr(path, err)
@@ -183,16 +231,22 @@ func Run(dir, name string, c Context) (Result, error) {
 	case lua.LString, lua.LNumber, lua.LBool:
 		return Result{Kind: "text", Text: lua.LVAsString(v)}, nil
 	case *lua.LTable:
+		str := func(k string) string {
+			if x := v.RawGetString(k); x != lua.LNil {
+				return lua.LVAsString(x)
+			}
+			return ""
+		}
+		r := Result{Kind: "text", Text: str("text"), Status: str("status"), Open: str("open"), Cursor: -1}
 		if l := v.RawGetString("line"); l != lua.LNil {
-			r := Result{Kind: "line", Line: lua.LVAsString(l), Cursor: -1}
+			r.Kind, r.Line = "line", lua.LVAsString(l)
 			if n, ok := v.RawGetString("cursor").(lua.LNumber); ok {
 				r.Cursor = int(n)
 			}
-			return r, nil
 		}
-		return Result{Kind: "text", Text: lua.LVAsString(v.RawGetString("text"))}, nil
+		return r, nil
 	}
-	return Result{}, fmt.Errorf("%s: run returned a %s; return a string, nil, {text=…} or {line=…, cursor=…}", filepath.Base(path), ret.Type())
+	return Result{}, fmt.Errorf("%s: run returned a %s; return a string, nil, {text=…}, {line=…, cursor=…} or {status=…, open=…}", filepath.Base(path), ret.Type())
 }
 
 func contextTable(L *lua.LState, c Context) *lua.LTable {
@@ -203,6 +257,13 @@ func contextTable(L *lua.LState, c Context) *lua.LTable {
 	t.RawSetString("body", lua.LString(c.Body))
 	t.RawSetString("notes_dir", lua.LString(c.NotesDir))
 	t.RawSetString("config_dir", lua.LString(c.ConfigDir))
+	src := c.Source
+	if src == "" {
+		src = SourceSlash
+	}
+	t.RawSetString("source", lua.LString(src))
+	t.RawSetString("app", lua.LString(c.App))
+	t.RawSetString("args", lua.LString(c.Args))
 	n := L.NewTable()
 	n.RawSetString("kind", lua.LString(c.Note.Kind))
 	n.RawSetString("id", lua.LString(c.Note.ID))
@@ -229,25 +290,36 @@ func scriptErr(path string, err error) error {
 	return fmt.Errorf("%s: %w", filepath.Base(path), err)
 }
 
-// WriteExample creates dir and a commented _example.lua if it is missing.
-func WriteExample(dir string) error {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
+// WriteExamples creates the slash and commands folders in configDir, each
+// with a commented _example.lua if it is missing.
+func WriteExamples(configDir string) error {
+	for _, ex := range []struct{ dir, script string }{
+		{SlashDirName, SlashExample},
+		{CommandDirName, CommandExample},
+	} {
+		dir := filepath.Join(configDir, ex.dir)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+		p := filepath.Join(dir, "_example.lua")
+		if _, err := os.Stat(p); err == nil {
+			continue
+		}
+		if err := os.WriteFile(p, []byte(ex.script), 0o644); err != nil {
+			return err
+		}
 	}
-	p := filepath.Join(dir, "_example.lua")
-	if _, err := os.Stat(p); err == nil {
-		return nil
-	}
-	return os.WriteFile(p, []byte(ExampleScript), 0o644)
+	return nil
 }
 
-// ExampleScript documents the command contract.
-const ExampleScript = `-- KatNotes slash command example.
+// SlashExample documents the "/" command contract.
+const SlashExample = `-- KatNotes "/" command example.
 --
 -- Each <name>.lua file in this folder becomes a "/name" command in the GUI
--- editor. Names may use a-z, 0-9, _ and -. Files starting with "_" (like this
--- one) are ignored: copy it to e.g. sig.lua to try it. After adding or editing
--- a file, run :reload from the command palette (Ctrl+Shift+P).
+-- editor. (":" command window commands live in ../commands/ instead.)
+-- Names may use a-z, 0-9, _ and -. Files starting with "_" (like this one)
+-- are ignored: copy it to e.g. sig.lua to try it. After adding or editing a
+-- file, run :reload from the command palette (Ctrl+Shift+P).
 --
 -- The file returns a table with a description (shown in the / menu) and a
 -- run(ctx) function. ctx has:
@@ -267,12 +339,55 @@ const ExampleScript = `-- KatNotes slash command example.
 --                                 column (optional, defaults to end of line)
 --
 -- The Lua standard library is available (os.date, string, table, io, …).
--- Scripts are stopped after 2 seconds.
+-- Scripts are stopped after 2 seconds, so typing never stalls.
 
 return {
   description = "Insert a signature with today's date",
   run = function(ctx)
     return "— " .. (os.getenv("USER") or "me") .. ", " .. os.date("%Y-%m-%d")
+  end,
+}
+`
+
+// CommandExample documents the ":" command contract.
+const CommandExample = `-- KatNotes ":" command example.
+--
+-- Each <name>.lua file in this folder becomes a ":name [args…]" command in
+-- the command window (":" in the TUI, Ctrl+Shift+P in the GUI), with the
+-- built-in commands. ("/" editor commands live in ../slash/ instead.)
+-- Names may use a-z, 0-9, _ and -; a name that is a built-in command (sync,
+-- tag…) is ignored. Files starting with "_" (like this one) are ignored:
+-- copy it to e.g. wordcount.lua to try it. The TUI picks up new files the
+-- next time you type ":"; in the GUI run :reload.
+--
+-- The file returns a table with a description (shown in the command list)
+-- and a run(ctx) function. Optional fields:
+--   timeout = 60     seconds the script may run (default 2, at most 300)
+--   long = true      run in the background, like :sync
+-- ctx has:
+--   ctx.args        the text typed after the name ("" if none)
+--   ctx.app         "tui" or "gui"
+--   ctx.body        the selected / open note (Markdown, without frontmatter),
+--   ctx.note          { kind, id, title, tags = {…}, path }, or "" and {} fields
+--   ctx.notes_dir   the notes folder
+--   ctx.config_dir  the KatNotes config folder
+--
+-- run can return:
+--   "text" or { status = "…" }    a message to show
+--   { open = "page/id" }          go to that note ("journal/2026-11-20", or a
+--                                 title, work too); status can go with it
+--   nil                           shows "<name>: done"
+-- The note list is reloaded afterwards, so scripts may write or change notes
+-- in ctx.notes_dir.
+--
+-- The Lua standard library is available (os.date, string, table, io, …).
+
+return {
+  description = "Count the words in the note",
+  run = function(ctx)
+    local n = 0
+    for _ in ctx.body:gmatch("%S+") do n = n + 1 end
+    return string.format("%s: %d words", ctx.note.title or "note", n)
   end,
 }
 `

@@ -73,6 +73,7 @@ type Spec struct {
 	UI        bool     `json:"ui,omitempty"`   // the frontend performs it
 	Long      bool     `json:"long,omitempty"` // slow (network): run it in the background
 	Apps      []string `json:"apps,omitempty"` // empty: every app
+	Lua       bool     `json:"lua,omitempty"`  // a user command from the Lua commands folder
 
 	run func(env *Env, args []string) (Result, error)
 }
@@ -207,7 +208,7 @@ type Result struct {
 }
 
 // Catalog lists the commands available in app ("" lists all), in display
-// order.
+// order: the built-ins, then the user's Lua commands (see LuaDir).
 func Catalog(app string) []*Spec {
 	out := make([]*Spec, 0, len(catalog))
 	for _, s := range catalog {
@@ -215,7 +216,7 @@ func Catalog(app string) []*Spec {
 			out = append(out, s)
 		}
 	}
-	return out
+	return append(out, luaSpecs()...)
 }
 
 var catalog []*Spec
@@ -271,7 +272,7 @@ func init() {
 		}, run: runTheme},
 		{Name: "zoom", Desc: "Toggle focus mode (hide sidebar and top bar)", UI: true, Apps: []string{AppGUI}},
 		{Name: "reload", Desc: "Reload notes from disk", UI: true, Apps: []string{AppTUI}},
-		{Name: "reload", Desc: "Reload config.toml and Lua / commands", UI: true, Apps: []string{AppGUI}},
+		{Name: "reload", Desc: "Reload config.toml and Lua commands", UI: true, Apps: []string{AppGUI}},
 		{Name: "help", Desc: "Show keyboard help", UI: true},
 		{Name: "quit", Desc: "Quit KatNotes", UI: true, Apps: []string{AppTUI}},
 	}

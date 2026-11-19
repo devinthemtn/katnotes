@@ -7,7 +7,7 @@ export type SlashCommand = {
   desc: () => string;
   // Text to put in place of the "/name" token; absent for line-level commands.
   text?: () => string;
-  // User command from ~/.config/katnotes/commands/<name>.lua (runs in Go).
+  // User command from ~/.config/katnotes/slash/<name>.lua (runs in Go).
   user?: boolean;
   // Task metadata key: make the line a task and move into its {key:…} block.
   meta?: string;

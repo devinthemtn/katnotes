@@ -16,10 +16,11 @@ func write(t *testing.T, dir, name, src string) {
 }
 
 func TestListAndRun(t *testing.T) {
-	dir := t.TempDir()
-	if err := WriteExample(dir); err != nil {
+	cfg := t.TempDir()
+	if err := WriteExamples(cfg); err != nil {
 		t.Fatal(err)
 	}
+	dir := filepath.Join(cfg, SlashDirName) // _example.lua there must not be listed
 	write(t, dir, "sig.lua", `return { description = "Signature", run = function(ctx) return "-- " .. ctx.note.title .. " #" .. ctx.note.tags[1] end }`)
 	write(t, dir, "upper.lua", `return { run = function(ctx) return { line = string.upper(ctx.before .. ctx.after), cursor = 2 } end }`)
 	write(t, dir, "nothing.lua", `return { run = function(ctx) return nil end }`)
@@ -71,7 +72,7 @@ func TestListAndRun(t *testing.T) {
 
 func TestExampleRuns(t *testing.T) {
 	dir := t.TempDir()
-	write(t, dir, "ex.lua", ExampleScript)
+	write(t, dir, "ex.lua", SlashExample)
 	r, err := Run(dir, "ex", Context{})
 	if err != nil || !strings.Contains(r.Text, time.Now().Format("2006-01-02")) {
 		t.Errorf("example = %+v, %v", r, err)
