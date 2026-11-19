@@ -27,7 +27,8 @@ tasks:
       - sh: npm version
         msg: "Looks like npm isn't installed. Npm is part of the Node installer: https://nodejs.org/en/download/"
     cmds:
-      - npm install
+      # Errors only (stderr): no summary, funding/audit notes or npmrc warnings.
+      - npm install --no-fund --no-audit --loglevel=error >/dev/null
 
   install:frontend:deps:bun:
     dir: frontend

@@ -17,6 +17,9 @@ vars:
     sh: echo "$(go env GOPATH)/bin"
   EXE:
     sh: go env GOEXE
+  # Where install-desktop puts the menu entry and icon.
+  XDG_DATA:
+    sh: echo "${XDG_DATA_HOME:-$HOME/.local/share}"
   # Name of the WSL command that runs the Windows GUI (installed by install-windows).
   WIN_WRAPPER: katnotes-win
 
@@ -40,7 +43,7 @@ tasks:
       - sh: command -v wails3
         msg: "wails3 not found: go install github.com/wailsapp/wails/v3/cmd/wails3@latest"
     cmds:
-      - '{{.GUI_TASK}} build VERSION={{.VERSION}}'
+      - '{{.GUI_TASK}} {{if .QUIET}}--silent{{end}} build VERSION={{.VERSION}}'
 
   # Cross-compiles both apps for Windows. Neither needs cgo there (the GUI
   # uses WebView2), so no mingw toolchain is required.
@@ -62,7 +65,7 @@ tasks:
       - wails3 generate syso -arch amd64 -icon {{.GUI_DIR}}/build/windows/icon.ico -manifest build/windows/katnotes.exe.manifest -info {{.BIN_DIR}}/katnotes-info.json -out cmd/katnotes/rsrc_windows_amd64.syso
       - defer: rm -f cmd/katnotes/rsrc_windows_amd64.syso
       - CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -buildvcs=false -ldflags="-s -w {{.LDFLAGS}}" -o {{.BIN_DIR}}/katnotes.exe ./cmd/katnotes
-      - '{{.GUI_TASK}} windows:build VERSION={{.VERSION}} ARCH=amd64'
+      - '{{.GUI_TASK}} {{if .QUIET}}--silent{{end}} windows:build VERSION={{.VERSION}} ARCH=amd64'
 
   # The installer to hand out: bin/KatNotes-<version>-windows-amd64-setup.exe.
   # It installs per user (no admin) into %LOCALAPPDATA%\Programs\katnotes:
@@ -124,15 +127,47 @@ tasks:
   # katnotes-win wrapper stay in step with the Linux ones.
   install:
     desc: Install katnotes and katnotes-gui into BINDIR (default $GOPATH/bin); in WSL, the Windows versions too
-    deps: [build, build-gui]
+    silent: true
+    vars:
+      IN_WSL:
+        sh: grep -qi microsoft /proc/sys/kernel/osrelease 2>/dev/null && command -v cmd.exe >/dev/null && echo yes || true
     cmds:
-      - install -m 755 {{.BIN_DIR}}/katnotes{{.EXE}} {{.BINDIR}}/
-      - install -m 755 {{.GUI_DIR}}/bin/katnotes-gui{{.EXE}} {{.BINDIR}}/
-      - cmd: |
-          if grep -qi microsoft /proc/sys/kernel/osrelease 2>/dev/null && command -v cmd.exe >/dev/null; then
-            "{{.TASK_EXE}}" install-windows
-          fi
+      - echo "Building katnotes {{.VERSION}}..."
+      - task: build
+        silent: true
+      - echo "Building katnotes-gui {{.VERSION}}..."
+      - task: build-gui
+        silent: true
+        vars: {QUIET: 'yes'}
+      - install -m 755 {{.BIN_DIR}}/katnotes{{.EXE}} {{.GUI_DIR}}/bin/katnotes-gui{{.EXE}} {{.BINDIR}}/
+      - task: install-desktop
+        silent: true
         platforms: [linux]
+      - cmd: '"{{.TASK_EXE}}" --silent install-windows QUIET=yes'
+        platforms: [linux]
+        if: '[ -n "{{.IN_WSL}}" ]'
+      - |
+        echo
+        echo "Installed into {{.BINDIR}}:"
+        echo "  katnotes      $("{{.BINDIR}}/katnotes{{.EXE}}" --version | sed "s/^katnotes version //")"
+        echo "  katnotes-gui  {{.VERSION}}"
+        {{if eq OS "linux"}}echo "  KatNotes menu entry and icon in {{.XDG_DATA}}"{{end}}
+        echo
+        echo "✓ Everything installed without errors."
+
+  # The menu entry and icon, so the desktop (GNOME, KDE, ...) shows the KatNotes
+  # icon in the launcher and taskbar. The window's app id is katnotes-gui
+  # (LinuxOptions.ProgramName), which matches katnotes-gui.desktop.
+  install-desktop:
+    desc: Install the KatNotes .desktop file and icon for this user (Linux)
+    platforms: [linux]
+    cmds:
+      - install -Dm644 {{.GUI_DIR}}/build/appicon.svg "{{.XDG_DATA}}/icons/hicolor/scalable/apps/katnotes-gui.svg"
+      # Exec gets the full path: the desktop session's PATH often lacks $GOPATH/bin.
+      - mkdir -p "{{.XDG_DATA}}/applications"
+      - sed "s|^Exec=katnotes-gui|Exec={{.BINDIR}}/katnotes-gui|" {{.GUI_DIR}}/build/linux/katnotes-gui.desktop > "{{.XDG_DATA}}/applications/katnotes-gui.desktop"
+      - cmd: update-desktop-database -q "{{.XDG_DATA}}/applications" 2>/dev/null || true
+      - cmd: gtk-update-icon-cache -q -t "{{.XDG_DATA}}/icons/hicolor" 2>/dev/null || true
 
   # From WSL: copies katnotes.exe and katnotes-gui.exe to
   # %LOCALAPPDATA%\Programs\katnotes, then build/windows/install.ps1 adds a
@@ -163,6 +198,9 @@ tasks:
           cd /mnt/c && powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$ps1" -Dir "$dir" -NotesDir "$notes"
       - sed "s|@EXE@|{{.WIN_INSTALL_DIR}}/katnotes-gui.exe|" {{.GUI_DIR}}/build/windows/katnotes-win.sh > {{.BIN_DIR}}/{{.WIN_WRAPPER}}
       - install -m 755 {{.BIN_DIR}}/{{.WIN_WRAPPER}} {{.BINDIR}}/{{.WIN_WRAPPER}}
+      - |
+        echo "Installed the Windows katnotes and katnotes-gui into {{.WIN_INSTALL_DIR}}"
+        echo "  and {{.WIN_WRAPPER}} into {{.BINDIR}}"
 
   clean:
     desc: Remove build output
