@@ -131,7 +131,11 @@ func (n *Note) Pinned() bool {
 
 // HasTag reports whether the note carries tag (case-insensitive).
 func (n *Note) HasTag(tag string) bool {
-	tag = strings.ToLower(strings.TrimPrefix(tag, "#"))
+	norm := NormalizeTags([]string{tag})
+	if len(norm) == 0 {
+		return false
+	}
+	tag = norm[0]
 	for _, t := range n.Tags {
 		if t == tag {
 			return true
@@ -576,6 +580,7 @@ func (s *Store) Rename(kind Kind, id, newTitle string) (*Note, []string, error) 
 			if err := s.Save(n); err != nil {
 				return nil, nil, err
 			}
+			s.cache.drop(old)
 			if err := os.Remove(old); err != nil {
 				return nil, nil, err
 			}
@@ -640,11 +645,34 @@ func (s *Store) write(n *Note, exclusive bool) error {
 		return err
 	}
 	s.cache.drop(n.Path)
-	if err := os.Rename(tmp.Name(), n.Path); err != nil {
+	if exclusive {
+		err = placeNew(tmp.Name(), n.Path)
+	} else {
+		err = os.Rename(tmp.Name(), n.Path)
+	}
+	if errors.Is(err, os.ErrExist) {
+		return fmt.Errorf("%w: %s/%s", ErrExists, n.Kind, n.ID)
+	}
+	if err != nil {
 		return err
 	}
 	if fi, err := os.Stat(n.Path); err == nil {
 		n.Stamp = FileStamp(fi)
 	}
 	return nil
+}
+
+// placeNew moves the finished temp file to path only if nothing is there
+// yet. A hard link does the check and the move in one step, so two apps
+// creating the same note at once can't overwrite each other. Filesystems
+// without hard links fall back to a check followed by a rename.
+func placeNew(tmp, path string) error {
+	err := os.Link(tmp, path)
+	if err == nil || errors.Is(err, os.ErrExist) {
+		return err
+	}
+	if _, serr := os.Stat(path); serr == nil {
+		return os.ErrExist
+	}
+	return os.Rename(tmp, path)
 }

@@ -62,7 +62,9 @@ func parseNote(data []byte, n *Note) error {
 	for k, v := range m {
 		switch k {
 		case "title":
-			n.Title = fmt.Sprint(v)
+			if v != nil { // an empty title: falls back to the heading or filename
+				n.Title = fmt.Sprint(v)
+			}
 		case "tags":
 			n.Tags = toTags(v)
 		case "created":
@@ -96,7 +98,9 @@ func toTags(v any) []string {
 	switch t := v.(type) {
 	case []any:
 		for _, x := range t {
-			raw = append(raw, fmt.Sprint(x))
+			if x != nil { // an empty list item (~ or a bare -)
+				raw = append(raw, fmt.Sprint(x))
+			}
 		}
 	case string:
 		raw = strings.FieldsFunc(t, func(r rune) bool { return r == ',' || r == ' ' })

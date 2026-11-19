@@ -153,3 +153,17 @@ func TestRmJSONNeedsForce(t *testing.T) {
 		t.Error("rm --json without --force: want an error")
 	}
 }
+
+func TestLsSort(t *testing.T) {
+	setup(t)
+	mustRun(t, "new", "--no-edit", "Beta")
+	mustRun(t, "new", "--no-edit", "Alpha")
+	out := mustRun(t, "ls", "--sort", "Title")
+	if strings.Index(out, "alpha") > strings.Index(out, "beta") {
+		t.Errorf("--sort Title not by title:\n%s", out)
+	}
+	mustRun(t, "ls", "--sort", "modified")
+	if _, err := run(t, "ls", "--sort", "bogus"); err == nil {
+		t.Error("--sort bogus: no error")
+	}
+}

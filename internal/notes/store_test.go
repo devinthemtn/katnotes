@@ -422,3 +422,56 @@ func TestStampTracksFileNotUpdated(t *testing.T) {
 		t.Fatalf("save stamp %q, file %q", b.Stamp, s.Stamp(KindPage, n.ID))
 	}
 }
+
+func TestNullFrontmatterValues(t *testing.T) {
+	s := newStore(t)
+	src := "---\ntitle:\ntags: [a, ~, b]\n---\n# From Heading\n"
+	if err := os.WriteFile(s.Path(KindPage, "x"), []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	n, err := s.Get(KindPage, "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n.Title != "From Heading" {
+		t.Errorf("title = %q, want the heading", n.Title)
+	}
+	if !reflect.DeepEqual(n.Tags, []string{"a", "b"}) {
+		t.Errorf("tags = %q, want [a b]", n.Tags)
+	}
+}
+
+func TestHasTagTrims(t *testing.T) {
+	n := &Note{Tags: []string{"work"}}
+	for _, q := range []string{"work", " #Work ", "WORK"} {
+		if !n.HasTag(q) {
+			t.Errorf("HasTag(%q) = false", q)
+		}
+	}
+	if n.HasTag("") || n.HasTag("#") {
+		t.Error("an empty tag matched")
+	}
+}
+
+func TestPlaceNewNeverOverwrites(t *testing.T) {
+	// A file that appears after write's early check (another app creating
+	// the same note) must survive the final move.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "race.md")
+	tmp := filepath.Join(dir, ".katnotes-1.tmp")
+	os.WriteFile(path, []byte("theirs\n"), 0o644)
+	os.WriteFile(tmp, []byte("mine\n"), 0o644)
+	if err := placeNew(tmp, path); !errors.Is(err, os.ErrExist) {
+		t.Fatalf("err = %v, want ErrExist", err)
+	}
+	if b, _ := os.ReadFile(path); string(b) != "theirs\n" {
+		t.Errorf("file was overwritten: %q", b)
+	}
+	os.Remove(path)
+	if err := placeNew(tmp, path); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(path); string(b) != "mine\n" {
+		t.Errorf("new file = %q", b)
+	}
+}

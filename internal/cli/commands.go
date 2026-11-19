@@ -106,9 +106,13 @@ func lsCmd(a *App) *cobra.Command {
 	}
 	kind := kindFlags(cmd)
 	cmd.Flags().StringVarP(&tag, "tag", "t", "", "only notes with this tag")
-	cmd.Flags().StringVarP(&sortBy, "sort", "s", "", "sort by updated, title or id")
+	cmd.Flags().StringVarP(&sortBy, "sort", "s", "", "sort by updated, created, title or id")
 	cmd.RunE = func(cmd *cobra.Command, _ []string) error {
-		list, err := a.Store.List(kind(), notes.ListOpts{Tag: tag, Sort: notes.SortBy(sortBy)})
+		sb, err := notes.ParseSort(sortBy)
+		if err != nil {
+			return err
+		}
+		list, err := a.Store.List(kind(), notes.ListOpts{Tag: tag, Sort: sb})
 		if err != nil {
 			return err
 		}
