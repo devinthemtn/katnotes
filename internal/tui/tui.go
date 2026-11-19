@@ -355,6 +355,7 @@ type model struct {
 	height  int
 	listW   int
 	preview string // key of note currently previewed
+	pending string // first key of a two-key sequence (g, d, Z)
 }
 
 func newModel(app *cli.App, style string) model {
@@ -364,6 +365,11 @@ func newModel(app *cli.App, style string) model {
 	l.SetShowStatusBar(false)
 	l.SetFilteringEnabled(false)
 	l.DisableQuitKeybindings()
+	// updateNormal handles paging and gg itself; drop the list's own
+	// b/f/d/u/g bindings so those letters don't page the list.
+	l.KeyMap.PrevPage.SetEnabled(false)
+	l.KeyMap.NextPage.SetEnabled(false)
+	l.KeyMap.GoToStart.SetKeys("home")
 
 	ti := textinput.New()
 	ti.CharLimit = 200
@@ -842,8 +848,26 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+// Keys that start a two-key sequence, vim style.
+var seqPrefixes = map[string]bool{"g": true, "d": true, "Z": true}
+
 func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
+	k := msg.String()
+	if m.pending != "" {
+		seq := m.pending + k
+		m.pending = ""
+		m.setStatus("")
+		if k == "ctrl+c" {
+			return m, tea.Quit
+		}
+		return m.updateSeq(seq)
+	}
+	if seqPrefixes[k] {
+		m.pending = k
+		m.setStatus(k + "…")
+		return m, nil
+	}
+	switch k {
 	case "q", "ctrl+c":
 		return m, tea.Quit
 	case ":":
@@ -900,7 +924,7 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "t":
 		return m, m.startInput(inTag, "Filter by tag (empty clears): ", m.tagFilter)
-	case "T":
+	case "J", "ctrl+j":
 		n, created, err := m.app.Store.Today()
 		if err != nil {
 			m.setErr(err)
@@ -918,7 +942,7 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if n := m.selected(); n != nil {
 			return m, m.startInput(inRename, "Rename to: ", n.Title)
 		}
-	case "d", "delete":
+	case "delete":
 		m.confirmDelete()
 		return m, nil
 	case "v":
@@ -971,16 +995,6 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.reload()
 		}
 		return m, nil
-	case "o":
-		if n := m.selected(); n != nil {
-			return m, m.previewCmd(n)
-		}
-		return m, nil
-	case "b", "f":
-		if n := m.selected(); n != nil {
-			m.openLinks(n, msg.String() == "b")
-		}
-		return m, nil
 	case "@":
 		if it, ok := m.list.SelectedItem().(taskItem); ok {
 			m.dueTask = &it
@@ -1015,10 +1029,19 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "R":
 		m.reloadAll()
 		return m, nil
-	case "pgdown", "ctrl+d", "J":
+	case "ctrl+d", "ctrl+u":
+		m.halfPage(k == "ctrl+d")
+		return m, nil
+	case "ctrl+e":
+		m.view.LineDown(1)
+		return m, nil
+	case "ctrl+y":
+		m.view.LineUp(1)
+		return m, nil
+	case "pgdown":
 		m.view.HalfPageDown()
 		return m, nil
-	case "pgup", "ctrl+u", "K":
+	case "pgup":
 		m.view.HalfPageUp()
 		return m, nil
 	}
@@ -1027,6 +1050,59 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m.skipHeaders(msg.String())
 	m.updatePreview()
 	return m, cmd
+}
+
+// updateSeq runs a two-key sequence (gg, gt, dd, ZZ, …). An unknown one,
+// or a prefix followed by esc, does nothing.
+func (m model) updateSeq(seq string) (tea.Model, tea.Cmd) {
+	switch seq {
+	case "gg":
+		m.list.Select(0)
+		m.skipHeaders("down")
+		m.updatePreview()
+	case "gt":
+		m.switchTab((m.tab + 1) % tab(len(tabNames)))
+	case "gT":
+		m.switchTab((m.tab + tab(len(tabNames)) - 1) % tab(len(tabNames)))
+	case "gx":
+		if n := m.selected(); n != nil {
+			return m, m.previewCmd(n)
+		}
+	case "gf", "gb":
+		if n := m.selected(); n != nil {
+			m.openLinks(n, seq == "gb")
+		}
+	case "dd":
+		m.confirmDelete()
+	case "ZZ", "ZQ":
+		return m, tea.Quit
+	}
+	return m, nil
+}
+
+// halfPage moves the list selection half a screen, like vim's ctrl+d/u.
+func (m *model) halfPage(down bool) {
+	step := m.list.Paginator.PerPage / 2
+	if step < 1 {
+		step = 1
+	}
+	i := m.list.Index()
+	dir := "down"
+	if down {
+		i += step
+	} else {
+		i -= step
+		dir = "up"
+	}
+	if n := len(m.list.Items()); i >= n {
+		i = n - 1
+	}
+	if i < 0 {
+		i = 0
+	}
+	m.list.Select(i)
+	m.skipHeaders(dir)
+	m.updatePreview()
 }
 
 // enter acts on the selected row: e edits it, and Enter does what the row
@@ -1316,18 +1392,20 @@ var helpSections = []struct {
 }{
 	{"Navigation", []helpEntry{
 		{"↑/↓  j/k", "move selection"},
-		{"tab  →  l", "next tab"},
-		{"shift+tab ← h", "previous tab"},
-		{"1 2 3 4", "Pages / Journal / Tags / Tasks"},
+		{"gg / G", "first / last item"},
+		{"ctrl+d / ctrl+u", "half a page down / up the list"},
 		{"ctrl+f / ctrl+b", "next / previous page of the list"},
-		{"J / K", "scroll preview (also pgdn/pgup, ctrl+d/u)"},
+		{"tab  l  gt", "next tab"},
+		{"shift+tab h gT", "previous tab"},
+		{"1 2 3 4", "Pages / Journal / Tags / Tasks"},
+		{"ctrl+e / ctrl+y", "scroll the preview a line (pgdn/pgup: half a page)"},
 	}},
 	{"Notes", []helpEntry{
 		{"n", "new page (or journal entry on the Journal tab)"},
 		{"enter / e", "edit in $EDITOR"},
 		{"r", "rename"},
-		{"d / delete", "delete (asks to confirm)"},
-		{"T", "open today's journal"},
+		{"dd / delete", "delete (asks to confirm)"},
+		{"J / ctrl+j", "open today's journal"},
 		{"R", "reload from disk"},
 		{"F", "show or collapse the frontmatter above the preview"},
 	}},
@@ -1347,14 +1425,14 @@ var helpSections = []struct {
 		{"t", "filter by tag"},
 		{"enter", "on the Tags tab: filter by that tag, or run a 🔎 saved search"},
 		{"esc", "clear search and tag filter (or close the links / :recent list)"},
-		{"o", "open the selected note in the Markdown previewer (config: previewer)"},
-		{"b", "notes that link to the selected note (backlinks)"},
-		{"f", "notes the selected note links to; enter on (missing) creates it"},
+		{"gx", "open the selected note in the Markdown previewer (config: previewer)"},
+		{"gb", "notes that link to the selected note (backlinks)"},
+		{"gf", "notes the selected note links to; enter on (missing) creates it"},
 	}},
 	{"General", []helpEntry{
 		{":", "command window: :open, :tag add, :set, :frontmatter… (tab completes, ↑ history)"},
 		{"? / F1", "toggle this help"},
-		{"q / ctrl+c", "quit"},
+		{"q  ZZ  :q", "quit (also ctrl+c)"},
 	}},
 }
 

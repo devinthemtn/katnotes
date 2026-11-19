@@ -216,12 +216,14 @@
   const helpSections: { title: string; keys: [string, string][] }[] = [
     { title: 'Notes', keys: [
       [`${modLabel}+N`, 'New page (or journal entry on the Journal tab)'],
-      [`${modLabel}+J`, "Open today's journal entry"],
+      [`${modLabel}+J / J`, "Open today's journal entry (J outside text fields)"],
+      ['F2', 'Rename: put the cursor in the title field'],
       [`${modLabel}+S`, 'Save now (notes also autosave as you type)'],
       ['Enter', 'In the title field: rename the note'],
       ['/', `In the editor: slash commands (${SLASH.map((c) => c.name).join(', ')})`],
       ['/your-command', 'Lua commands from ~/.config/katnotes/commands/*.lua (:reload after editing)'],
       [`${modLabel}+Enter`, 'In the editor: make the line a task, or check/uncheck it'],
+      [`${modLabel}+Shift+K`, 'In the editor: delete the line (or every line in the selection)'],
       ['Enter', 'On a list item or task: continue the list below; on an empty one: remove it'],
       ['[[', 'In the editor: link to a page or journal day; saved as a Markdown link'],
       ['Click a link', 'In the preview: open the note (a missing one is created first)'],
@@ -231,19 +233,20 @@
       ['Tab', 'In the editor: indent two spaces'],
     ]},
     { title: 'Finding', keys: [
-      [`${modLabel}+K / ${modLabel}+F`, 'Focus search; Tab in the box switches Name (fuzzy title/filename) · Tags · Text'],
+      [`${modLabel}+F / ${modLabel}+K / /`, 'Focus search (/ outside text fields); Tab in the box switches Name (fuzzy title/filename) · Tags · Text'],
       [`${modLabel}+P`, 'Quick open: jump to any note by name (recent first)'],
       ['Sort', 'The list’s sort menu: modified, created or title (remembered per tab, shared with the TUI)'],
       ['Tags tab', 'Click a tag to filter Pages and Journal, or a 🔎 saved search (:search save <name>)'],
       ['clear', 'Remove the search and tag filter'],
     ]},
     { title: 'View', keys: [
+      [`${modLabel}+1 … 4`, 'Pages / Journal / Tags / Tasks tab'],
       [`${modLabel}+E`, 'Cycle Edit → Split → Preview'],
       [`${modLabel}+= / ${modLabel}+-`, 'Make text larger / smaller'],
       [`${modLabel}+0`, 'Reset text size'],
       [`${modLabel}+Shift+T`, 'All tasks from every note (Esc to go back)'],
       [`${modLabel}+Shift+O`, 'Open the note in the default app (Settings: open with)'],
-      [`${modLabel}+Shift+P / ${modLabel}+Shift+:`, 'Command palette'],
+      [`${modLabel}+Shift+P / :`, 'Command palette (: outside text fields; also Ctrl+Shift+:)'],
       [`${modLabel}+Shift+Z`, 'Zoom: hide the sidebar and top bar (again to exit)'],
     ]},
     { title: 'General', keys: [
@@ -259,6 +262,7 @@
 
   let searchEl: HTMLInputElement | undefined = $state();
   let bodyEl: HTMLTextAreaElement | undefined = $state();
+  let titleEl: HTMLInputElement | undefined = $state();
 
   let saveTimer: ReturnType<typeof setTimeout> | undefined;
   let searchTimer: ReturnType<typeof setTimeout> | undefined;
@@ -1346,6 +1350,24 @@
       helpOpen = !helpOpen;
       return;
     }
+    if (e.key === 'F2') {
+      // Rename: the title field (TUI: r).
+      e.preventDefault();
+      titleEl?.focus();
+      titleEl?.select();
+      return;
+    }
+    // The TUI's single keys, when not typing in a field.
+    const dialog = newOpen || deleteOpen || settingsOpen || helpOpen || cmdOpen || fmEditOpen;
+    if (!mod && !e.altKey && !dialog && !isTyping(e.target)) {
+      const bare: Record<string, () => void> = {
+        '/': () => { searchEl?.focus(); searchEl?.select(); },
+        ':': () => { if (!cmdOpen) openPalette(); },
+        J: () => openToday(),
+      };
+      const act = bare[e.key];
+      if (act) { e.preventDefault(); act(); return; }
+    }
     if (!mod) return;
     if (e.shiftKey) {
       const k = e.key.toLowerCase();
@@ -1377,6 +1399,10 @@
       case '-':
       case '_': e.preventDefault(); setScale(uiScale - 0.1); break;
       case '0': e.preventDefault(); setScale(1); break;
+      case '1': e.preventDefault(); switchTab('page'); break;
+      case '2': e.preventDefault(); switchTab('journal'); break;
+      case '3': e.preventDefault(); switchTab('tags'); break;
+      case '4': e.preventDefault(); switchTab('tasks'); break;
       case 'e': e.preventDefault(); setView(viewMode === 'edit' ? 'split' : viewMode === 'split' ? 'preview' : 'edit'); break;
     }
   }
@@ -1416,6 +1442,33 @@
     if (!l) return;
     const out = makeTask(l.text);
     replaceRange(l.start, l.end, out, l.start + out.length);
+  }
+
+  // Delete every line the caret or selection touches, newline included.
+  // The caret keeps its column on the line that moves up into place.
+  function deleteLines() {
+    if (!bodyEl) return;
+    const v = bodyEl.value;
+    const a = bodyEl.selectionStart;
+    // A selection ending at the start of a line doesn't take that line.
+    let b = bodyEl.selectionEnd;
+    if (b > a && v[b - 1] === '\n') b--;
+    const start = v.lastIndexOf('\n', a - 1) + 1;
+    let end = v.indexOf('\n', b);
+    const col = a - start;
+    let from = start;
+    if (end < 0) {
+      // Last line: eat the newline before it instead.
+      end = v.length;
+      if (from > 0) from--;
+    } else {
+      end++;
+    }
+    const rest = v.slice(0, from) + v.slice(end);
+    const ls = from === start ? start : rest.lastIndexOf('\n', from - 1) + 1;
+    let le = rest.indexOf('\n', ls);
+    if (le < 0) le = rest.length;
+    replaceRange(from, end, '', Math.min(ls + col, le));
   }
 
   // Re-check whether the caret sits after a "/word" and show/hide the menu.
@@ -1657,6 +1710,12 @@
       e.preventDefault();
       e.stopPropagation();
       taskifyLine();
+      return;
+    }
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'k') {
+      e.preventDefault();
+      e.stopPropagation();
+      deleteLines();
       return;
     }
     if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && !e.isComposing) {
@@ -1919,6 +1978,7 @@
         {#if !zoomed}
         <input
           class="title-input"
+          bind:this={titleEl}
           bind:value={draftTitle}
           onblur={commitTitle}
           onkeydown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}

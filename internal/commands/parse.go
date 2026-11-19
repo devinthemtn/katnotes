@@ -73,9 +73,15 @@ type Parsed struct {
 	Args []string
 }
 
+// Vim's short names for commands, accepted as the first word.
+var aliases = map[string]string{"q": "quit", "q!": "quit", "qa": "quit", "qa!": "quit", "h": "help"}
+
 // Parse reads a command line ("tag add work ideas").
 func Parse(app, input string) (*Parsed, error) {
 	input = strings.TrimSpace(input)
+	if first, rest, _ := strings.Cut(input, " "); aliases[first] != "" {
+		input = strings.TrimSpace(aliases[first] + " " + rest)
+	}
 	toks := tokenize(input)
 	if len(toks) == 0 {
 		return nil, fmt.Errorf("empty command")

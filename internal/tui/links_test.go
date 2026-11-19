@@ -37,10 +37,12 @@ func TestLinksView(t *testing.T) {
 	if !strings.Contains(m.view.View(), "Linked from (1)") {
 		t.Errorf("preview lacks backlinks footer:\n%s", m.view.View())
 	}
+	press("g")
 	press("b")
 	if items := m.list.Items(); len(items) != 1 || noteOf(items[0]).ID != "plan" {
 		t.Fatalf("backlinks items = %+v", items)
 	}
+	press("g")
 	press("f") // from Plan: Groceries and the missing Ideas
 	items := m.list.Items()
 	if len(items) != 2 || noteOf(items[0]).ID != "groceries" {
@@ -68,13 +70,18 @@ func TestPreviewKey(t *testing.T) {
 	m.width, m.height = 100, 30
 	m.layout()
 	m.reload()
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("o")})
-	m = next.(model)
+	gx := func() tea.Cmd {
+		next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("g")})
+		next, cmd := next.(model).Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+		m = next.(model)
+		return cmd
+	}
+	cmd := gx()
 	if cmd != nil || m.isErr || !strings.Contains(m.status, "opened page/p in true") {
 		t.Errorf("status = %q err=%v cmd=%v", m.status, m.isErr, cmd != nil)
 	}
 	m.app.Cfg.PreviewerMode = "terminal"
-	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("o")}); cmd == nil {
+	if cmd := gx(); cmd == nil {
 		t.Error("terminal previewer should return an exec command")
 	}
 }

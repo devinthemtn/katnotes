@@ -193,21 +193,24 @@ Every command accepts `--json` for scripting. The commands shared with the comma
 
 | Key | Action |
 |---|---|
-| `tab` / `1`–`4` | switch between Pages, Journal, Tags and Tasks |
+| `j` / `k` | move the selection |
+| `gg` / `G` | first / last item |
+| `ctrl+d` / `ctrl+u` | half a page down / up the list |
+| `ctrl+f` / `ctrl+b` | next / previous page of the list |
+| `tab` / `1`–`4` / `gt` / `gT` | switch between Pages, Journal, Tags and Tasks (`h` / `l` too) |
+| `ctrl+e` / `ctrl+y` | scroll the preview a line (`pgdn` / `pgup`: half a page) |
 | `n` | new note |
 | `enter` / `e` | edit in `$EDITOR` |
-| `o` | open in the Markdown previewer (`previewer` in the config, e.g. katdown or glow) |
+| `gx` | open in the Markdown previewer (`previewer` in the config, e.g. katdown or glow) |
 | `r` | rename |
-| `d` | delete |
-| `T` | today's journal |
+| `dd` | delete (asks first) |
+| `J` / `ctrl+j` | today's journal |
 | `/` | live search: Tab switches Name / Tags / Text, Enter keeps it, Esc clears |
 | `ctrl+p` | quick open a note by name |
 | `s` | sort Pages / Journal: modified, created, title |
 | `t` | filter by tag (`enter` on the Tags tab does the same) |
 | `esc` | clear filters |
 | `R` | reload notes from disk (same as `:reload`) |
-| `J` / `K` | scroll the preview |
-| `ctrl+f` / `ctrl+b` | next / previous page of the list |
 | `:` | command window: `:open`, `:tag add`, `:set`, `:frontmatter`, … with completion (see [Command window](#command-window)) |
 | `v` | Tasks tab: switch between notes with tasks and all tasks |
 | `a` | all tasks: cycle open → done → all |
@@ -217,10 +220,12 @@ Every command accepts `--json` for scripting. The commands shared with the comma
 | `@` | all tasks: set the due date (`2026-11-20`, `today`, `tom`, `fri`, `+3d`, `+2w`; empty clears) |
 | `p` | all tasks: cycle priority (high → med → low → none) |
 | `enter` | Tasks tab: edit the note at the task's line (vim, nano, helix, code and others) |
-| `b` | notes that link to the selected note (esc closes) |
-| `f` | notes the selected note links to; `enter` on a (missing) one creates it |
+| `gb` | notes that link to the selected note (esc closes) |
+| `gf` | notes the selected note links to; `enter` on a (missing) one creates it |
 | `?` / `F1` | help popup (shows the version; scrolls if the window is short) |
-| `q` | quit |
+| `q` / `ZZ` / `:q` | quit |
+
+`g`, `d` and `Z` start two-key sequences, as in vim; the status bar shows the pending key, and `esc` cancels it. The command window also takes `:q`, `:q!` and `:h`.
 
 ## GUI
 
@@ -233,22 +238,27 @@ If a note is changed outside the app (by the CLI, the TUI or another editor), th
 | Shortcut | Action |
 |---|---|
 | Ctrl+N | new note |
-| Ctrl+J | today's journal |
-| Ctrl+K | search (Tab in the box switches Name / Tags / Text) |
+| Ctrl+J (or `J`) | today's journal |
+| F2 | rename: put the cursor in the title field |
+| Ctrl+F / Ctrl+K (or `/`) | search (Tab in the box switches Name / Tags / Text) |
 | Ctrl+P | quick open a note by name |
 | Ctrl+S | save |
+| Ctrl+1 … Ctrl+4 | Pages, Journal, Tags and Tasks tabs |
 | Ctrl+E | cycle edit, split and preview |
 | `[[` | link to a page or journal day (picker; saved as a Markdown link) |
 | Ctrl+Enter | make the line a task, or check/uncheck it |
+| Ctrl+Shift+K | delete the line (or every line in the selection) |
 | Enter | on a list item or task: continue the list below, with the same bullet, the next number, or a new unchecked box (Shift+Enter for a plain new line); on an empty item: remove it |
 | `{` on a task line | start a `{key:value}` block: suggests `due`, `pri`, `start` and keys you've used, then values (dates like `today`, `fri`, `+3d` become `YYYY-MM-DD`) |
 | Ctrl+Space | on a task line: open those suggestions, adding the `{}` block if needed |
-| Ctrl+Shift+P / Ctrl+Shift+: | command palette, the same commands as the TUI's `:` (see [Command window](#command-window)) |
+| Ctrl+Shift+P (or `:`) | command palette, the same commands as the TUI's `:` (see [Command window](#command-window)) |
 | Ctrl+Shift+T | all tasks from every note: filter by due date, sort by due, set the due date and priority per task |
 | Ctrl+Shift+O | open the note in the default app (`open_with`) |
 | Ctrl+Shift+Z | zoom: hide the sidebar and top bar |
 | Ctrl+= / Ctrl+- / Ctrl+0 | larger, smaller, reset text size |
-| `?` / F1 | help popup with the app version (`?` works when you're not typing in a field) |
+| `?` / F1 | help popup with the app version |
+
+The keys in backticks (`/`, `:`, `J`, `?`) are the TUI's, and work when you're not typing in a field.
 
 ### Lua commands
 
