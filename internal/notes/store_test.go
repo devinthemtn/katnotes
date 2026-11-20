@@ -166,6 +166,51 @@ func TestToday(t *testing.T) {
 	}
 }
 
+func TestJournalTemplateFrontmatter(t *testing.T) {
+	s := newStore(t)
+	s.JournalTemplate = "---\ntitle: ignored\ntags: [daily]\nmood: \"\"\nday: \"{{.ID}}\"\ncontains_task: false\n---\n# {{.Date}}\n\n- [ ] plan\n"
+	n, err := s.Create(KindJournal, "2026-11-20", []string{"work"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n.Title != "2026-11-20" || n.Body != "# 2026-11-20\n\n- [ ] plan\n" {
+		t.Errorf("title %q body %q", n.Title, n.Body)
+	}
+	if strings.Join(n.Tags, ",") != "work,daily" {
+		t.Errorf("tags %v", n.Tags)
+	}
+	got, err := s.Get(KindJournal, "2026-11-20")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Extra["mood"] != "" || got.Extra["day"] != "2026-11-20" || got.Extra[TaskKey] != true {
+		t.Errorf("extra %v", got.Extra)
+	}
+	if !got.Created.Equal(fixed) {
+		t.Errorf("created %v", got.Created)
+	}
+}
+
+func TestJournalTemplateMissingField(t *testing.T) {
+	s := newStore(t)
+	s.JournalTemplate = "# {{.Date}}{{.Title}}\n"
+	n, _, err := s.Today()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n.Body != "# 2026-11-16\n" {
+		t.Errorf("body %q", n.Body)
+	}
+}
+
+func TestJournalTemplateBadFrontmatter(t *testing.T) {
+	s := newStore(t)
+	s.JournalTemplate = "---\ntags: [unclosed\n---\n# {{.Date}}\n"
+	if _, _, err := s.Today(); err == nil || !strings.Contains(err.Error(), "journal template") {
+		t.Errorf("want a journal template error, got %v", err)
+	}
+}
+
 func TestListSearchTags(t *testing.T) {
 	s := newStore(t)
 	s.Create(KindPage, "Alpha", []string{"go", "tui"}, "# Alpha\n\nBubbletea is great\n")

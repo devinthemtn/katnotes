@@ -108,7 +108,7 @@ journal_template = "# {{.Date}}\n\n"
 
 The date fields describe the **journal day**, not today. Opening next Monday's entry gives `Monday` and next Monday's date.
 
-There is no `{{.Title}}`: a journal day's title is its date. A misspelled field comes out as `<no value>`, not empty as it does in page templates.
+There is no `{{.Title}}`: a journal day's title is its date. A misspelled field, or `{{.Title}}`, comes out empty, as in page templates.
 
 ### Setting it
 
@@ -133,9 +133,21 @@ Pick whichever is easiest:
 
   A newline straight after the opening `"""` is dropped, so this starts with the heading. In the GUI, run `:reload` after editing the file.
 
-### No frontmatter
+### Frontmatter
 
-The journal template is **body only**. Frontmatter in it isn't read, so it ends up as text in the body. Journal days get their title, `created` and `updated` automatically. To tag a day, add tags after creating it (`:tag add …`, or `T` in the TUI).
+A journal template can start with frontmatter, and it's handled the same way as in page templates. `tags` are added to the day, `title`, `created`, `updated` and `contains_task` are ignored, and any other key is copied. Quote dates here too:
+
+```toml
+journal_template = """
+---
+tags: [daily]
+mood: ""
+week_of: "{{.ID}}"
+---
+# {{.Weekday}} {{.Date}}
+
+"""
+```
 
 Templates apply only when a note is **created**. Editing a template doesn't change notes made from it earlier.
 
@@ -181,8 +193,8 @@ There's no date arithmetic (such as "next Friday"), and fields can't come from o
 | `template: … unexpected …` when creating | a `{{` without a matching `}}`, or an `{{if}}` with no `{{end}}` |
 | `no template "x" (have: …)` | the file isn't `<config>/templates/x.md`, or its name uses characters other than letters, digits, `_` and `-` |
 | a date in frontmatter shows up as `…T00:00:00Z` | put the value in quotes: `"{{.ID}}"` |
-| `<no value>` in a journal day | a misspelled field, e.g. `{{.Title}}`, which journals don't have |
-| `---` and keys in a journal's body | journal templates can't set frontmatter (see above) |
+| a field comes out empty | it's misspelled, or it doesn't exist for that kind (journals have no `{{.Title}}`) |
+| `journal template: frontmatter: …` | the frontmatter at the top of `journal_template` isn't valid YAML |
 
 ## Examples
 

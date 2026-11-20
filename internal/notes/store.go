@@ -152,8 +152,9 @@ func (n *Note) HasTag(tag string) bool {
 // Store reads and writes notes under Root.
 type Store struct {
 	Root string
-	// JournalTemplate is a text/template for new journal bodies. Fields:
-	// .Date (formatted with DateFormat), .ID, .Weekday, .Time.
+	// JournalTemplate is a text/template for new journal entries. Fields:
+	// .Date (formatted with DateFormat), .ID, .Weekday, .Time. It may start
+	// with frontmatter, like a page template.
 	JournalTemplate string
 	// DateFormat is the Go time layout used for journal titles and .Date.
 	DateFormat string
@@ -569,7 +570,19 @@ func (s *Store) createJournal(d time.Time, tags []string, body string) (*Note, e
 		if err != nil {
 			return nil, err
 		}
-		n.Body = b
+		// Frontmatter in the template: its tags join the entry's and other
+		// keys are copied, as for page templates. The entry's own title,
+		// created and updated win.
+		var t Note
+		if err := parseNote([]byte(b), &t); err != nil {
+			return nil, fmt.Errorf("journal template: %w", err)
+		}
+		n.Body = t.Body
+		n.Tags = NormalizeTags(append(n.Tags, t.Tags...))
+		for _, k := range []string{"created", "updated", TaskKey} {
+			delete(t.Extra, k)
+		}
+		n.Extra = t.Extra
 	}
 	if err := s.write(n, true); err != nil {
 		return nil, err
@@ -583,7 +596,8 @@ func (s *Store) renderJournal(d time.Time) (string, error) {
 	if src == "" {
 		return "", nil
 	}
-	tmpl, err := template.New("journal").Parse(src)
+	// missingkey=zero: a misspelled field renders empty, as in page templates.
+	tmpl, err := template.New("journal").Option("missingkey=zero").Parse(src)
 	if err != nil {
 		return "", fmt.Errorf("journal template: %w", err)
 	}
