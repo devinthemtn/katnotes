@@ -551,7 +551,7 @@ func (m *model) linkedFrom(n *notes.Note) string {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString("\n" + filterStyle.Render(fmt.Sprintf("  Linked from (%d)", len(bl))) + statusStyle.Render("  · b lists them") + "\n")
+	b.WriteString("\n" + filterStyle.Render(fmt.Sprintf("  Linked from (%d)", len(bl))) + statusStyle.Render("  · gb lists them") + "\n")
 	for _, x := range bl {
 		line := x.Lines[0].Text
 		if r := []rune(line); len(r) > 60 {
