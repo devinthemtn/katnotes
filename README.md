@@ -277,7 +277,7 @@ The keys in backticks (`/`, `:`, `J`, `?`) are the TUI's, and work when you're n
 
 ### Lua commands
 
-KatNotes runs your own commands written in Lua (gopher-lua, standard library available). There are two kinds, each in its own folder of the config directory, and each folder gets a commented `_example.lua` on first launch. Files starting with `_` are ignored, and names may use `a-z`, `0-9`, `_` and `-`.
+KatNotes runs your own commands written in Lua (gopher-lua, standard library available). The full guide, with more examples, is in [docs/lua-scripting.md](docs/lua-scripting.md). There are two kinds, each in its own folder of the config directory, and each folder gets a commented `_example.lua` on first launch. Files starting with `_` are ignored, and names may use `a-z`, `0-9`, `_` and `-`.
 
 **`/` commands** (`~/.config/katnotes/slash/<name>.lua`) work in the GUI editor: typing `/name` runs the script and puts what it returns into the note. They are stopped after 2 s, so typing never stalls. After editing one, run `:reload`.
 
@@ -345,7 +345,7 @@ On an empty prompt, ↑ steps back through earlier commands and the most recent 
 
 ### Page templates
 
-Every `.md` file in `~/.config/katnotes/templates/` is a template for `new from <name> <title>`, the GUI's new-page dialog and `katnotes new --template`. Templates are Go text/templates with `{{.Title}}`, `{{.Date}}`, `{{.ID}}` (today as YYYY-MM-DD), `{{.Weekday}}` and `{{.Time}}`. Frontmatter in a template (tags, `status: draft`…) is copied to the new page:
+Every `.md` file in `~/.config/katnotes/templates/` is a template for `new from <name> <title>`, the GUI's new-page dialog and `katnotes new --template`. Templates are Go text/templates with `{{.Title}}`, `{{.Date}}`, `{{.ID}}` (today as YYYY-MM-DD), `{{.Weekday}}` and `{{.Time}}`. Frontmatter in a template (tags, `status: draft`…) is copied to the new page. The full guide, covering page templates and `journal_template`, is in [docs/templates.md](docs/templates.md).
 
 ```markdown
 ---
