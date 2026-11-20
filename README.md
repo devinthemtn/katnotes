@@ -202,7 +202,7 @@ Every command accepts `--json` for scripting. The commands shared with the comma
 | `ctrl+e` / `ctrl+y` | scroll the preview a line (`pgdn` / `pgup`: half a page) |
 | `n` | new note |
 | `enter` / `e` | edit in `$EDITOR` |
-| `gx` | open in the Markdown previewer (`previewer` in the config, e.g. katdown or glow) |
+| `p` / `gx` | open in the Markdown previewer (`previewer` in the config, e.g. katdown or glow) |
 | `r` | rename |
 | `dd` | delete (asks first) |
 | `J` / `ctrl+j` | today's journal |

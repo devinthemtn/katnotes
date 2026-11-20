@@ -27,7 +27,7 @@ const EnvConfigDir = "KATNOTES_CONFIG_DIR"
 type Config struct {
 	NotesDir string `toml:"notes_dir" json:"notes_dir"`
 	Editor   string `toml:"editor" json:"editor"`
-	// Previewer is the Markdown viewer the TUI's "o" key opens the selected
+	// Previewer is the Markdown viewer the TUI's "p" (or "gx") key opens the selected
 	// note in (e.g. "katdown", "glow -p"). Empty tries katdown, glow,
 	// frogmouth, then mdcat.
 	Previewer string `toml:"previewer" json:"previewer"`

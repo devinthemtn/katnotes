@@ -84,4 +84,9 @@ func TestPreviewKey(t *testing.T) {
 	if cmd := gx(); cmd == nil {
 		t.Error("terminal previewer should return an exec command")
 	}
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
+	m = next.(model)
+	if cmd == nil || m.isErr {
+		t.Errorf("p should preview like gx: err=%v status=%q", m.isErr, m.status)
+	}
 }

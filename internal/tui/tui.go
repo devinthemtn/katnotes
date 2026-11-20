@@ -1017,6 +1017,8 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.setStatus("priority " + next)
 			}
 			m.reload()
+		} else if n := m.selected(); n != nil {
+			return m, m.previewCmd(n)
 		}
 		return m, nil
 	case "e", "enter":
@@ -1367,7 +1369,7 @@ func (m model) View() string {
 	if m.mode == modeHelp {
 		return m.helpView()
 	}
-	help := statusStyle.Render(": commands · ? help · n new · enter/e edit · o preview · r rename · d delete · T today · / search · t tag · tab switch · J/K scroll · q quit")
+	help := statusStyle.Render(": commands · ? help · n new · enter/e edit · p preview · r rename · dd delete · J today · / search · t tag · tab switch · ctrl+e/y scroll · q quit")
 	if m.tab == tabTasks {
 		view := "v all tasks"
 		if m.allTasks {
@@ -1430,7 +1432,7 @@ var helpSections = []struct {
 		{"t", "filter by tag"},
 		{"enter", "on the Tags tab: filter by that tag, or run a 🔎 saved search"},
 		{"esc", "clear search and tag filter (or close the links / :recent list)"},
-		{"gx", "open the selected note in the Markdown previewer (config: previewer)"},
+		{"p / gx", "open the selected note in the Markdown previewer (config: previewer)"},
 		{"gb", "notes that link to the selected note (backlinks)"},
 		{"gf", "notes the selected note links to; enter on (missing) creates it"},
 	}},
