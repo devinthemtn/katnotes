@@ -7,6 +7,15 @@ Personal notes in plain Markdown with YAML frontmatter. KatNotes has one Go core
 
 Every frontend goes through the same `internal/notes` package, so they all read and write the same files.
 
+## Installing on Windows
+
+Run `KatNotes-<version>-windows-amd64-setup.exe`. It installs for your user only and doesn't need admin rights.
+
+The installer isn't code-signed yet, so Windows warns you before running it:
+
+- **"Windows protected your PC"** (SmartScreen): click **More info**, then **Run anyway**.
+- **"Smart App Control blocked an app that may be unsafe"**: this screen has no way past it. The only option is to turn Smart App Control off in Settings > Privacy & security > Windows Security > App & browser control > Smart App Control. Windows only lets you turn it back on by resetting or reinstalling Windows.
+
 ## Where things live
 
 | What | Where |
