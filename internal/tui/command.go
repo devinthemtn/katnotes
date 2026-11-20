@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -124,11 +125,25 @@ func (m *model) openCommand() tea.Cmd {
 // openQuickOpen is the command window as a jump-to-note box: ":open " with
 // fuzzy title / filename matching, recent notes first. Enter opens the
 // highlighted note.
-func (m *model) openQuickOpen() tea.Cmd {
-	cmd := m.openCommand()
+func (m *model) openQuickOpen() tea.Cmd { return m.openNotePicker("open ") }
+
+// openLinkPicker is the same box for ":link ": enter links the selected note
+// to the highlighted one.
+func (m *model) openLinkPicker() tea.Cmd {
+	if m.selected() == nil {
+		m.setErr(fmt.Errorf("link: select a note first"))
+		return nil
+	}
+	return m.openNotePicker("link ")
+}
+
+// openNotePicker opens the command window on cmd (a command taking a note),
+// where enter takes the highlighted note even if it wasn't picked with ↑↓.
+func (m *model) openNotePicker(cmd string) tea.Cmd {
+	c := m.openCommand()
 	m.cmdQuick = true
-	m.setCmdInput("open ")
-	return cmd
+	m.setCmdInput(cmd)
+	return c
 }
 
 func (m *model) closeCommand() {
@@ -252,7 +267,7 @@ func (m *model) applyResult(line string, r commands.Result, err error) tea.Cmd {
 		}
 		return nil
 	}
-	if m.cmdHistPath != "" {
+	if m.cmdHistPath != "" && line != "" { // "" when run by a key, not typed
 		if h, err := commands.AddHistory(m.cmdHistPath, line); err == nil {
 			m.cmdHist = h
 		}

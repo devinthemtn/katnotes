@@ -239,6 +239,9 @@ func init() {
 		{Name: "journal", Desc: "Open a journal day (default today)", Args: []Arg{{Name: "date", Kind: ArgDate, Optional: true}}, run: runJournal},
 		{Name: "tag add", Desc: "Add tags to the note", NeedsNote: true, Args: []Arg{{Name: "tag", Kind: ArgTag, Many: true}}, run: runTagAdd},
 		{Name: "tag rm", Desc: "Remove tags from the note", NeedsNote: true, Args: []Arg{{Name: "tag", Kind: ArgNoteTag, Many: true}}, run: runTagRm},
+		{Name: "tags", Desc: "Replace the note's tags, e.g. tags work, ideas (empty clears)", NeedsNote: true, Args: []Arg{
+			{Name: "tags", Kind: ArgText, Rest: true, Optional: true, complete: currentTags},
+		}, run: runTags},
 		{Name: "set", Desc: "Set a frontmatter field (adds frontmatter if missing)", NeedsNote: true, Args: []Arg{
 			{Name: "field", Kind: ArgField},
 			{Name: "value", Kind: ArgText, Rest: true, complete: fieldValues},
@@ -252,6 +255,7 @@ func init() {
 		{Name: "pin", Desc: "Pin the note to the top of the list", NeedsNote: true, run: runPin},
 		{Name: "unpin", Desc: "Unpin the note", NeedsNote: true, run: runUnpin},
 		{Name: "copy-link", Desc: "Copy a Markdown link to the note", NeedsNote: true, run: runCopyLink},
+		{Name: "link", Desc: "Link this note to another (adds it under ## Links)", NeedsNote: true, Args: []Arg{note}, run: runLink},
 		{Name: "links", Desc: "Notes this note links to", NeedsNote: true, run: runLinks},
 		{Name: "backlinks", Desc: "Notes that link to this note", NeedsNote: true, run: runBacklinks},
 		{Name: "frontmatter", Desc: "Edit the note's frontmatter as YAML (adds one if missing)", NeedsNote: true, UI: true},

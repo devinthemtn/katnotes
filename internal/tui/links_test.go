@@ -90,3 +90,51 @@ func TestPreviewKey(t *testing.T) {
 		t.Errorf("p should preview like gx: err=%v status=%q", m.isErr, m.status)
 	}
 }
+
+// T edits the selected note's tags; L links it to another note.
+func TestTagAndLinkKeys(t *testing.T) {
+	st := notes.New(t.TempDir())
+	if err := st.Init(); err != nil {
+		t.Fatal(err)
+	}
+	st.Create(notes.KindPage, "Groceries", nil, "milk\n")
+	st.Create(notes.KindPage, "Plan", []string{"old"}, "# Plan\n")
+	m := newModel(&cli.App{Store: st, Out: io.Discard}, "dark")
+	m.width, m.height = 100, 30
+	m.layout()
+	m.reload()
+	send := func(msg tea.KeyMsg) {
+		next, _ := m.Update(msg)
+		m = next.(model)
+	}
+	keys := func(s string) { send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}) }
+	enter := func() { send(tea.KeyMsg{Type: tea.KeyEnter}) }
+
+	m.selectKey("page/plan")
+	keys("T")
+	if m.mode != modeInput || m.input.Value() != "old" {
+		t.Fatalf("T: mode %v, input %q", m.mode, m.input.Value())
+	}
+	m.input.SetValue("work, ideas")
+	enter()
+	if n, _ := st.Get(notes.KindPage, "plan"); m.isErr || strings.Join(n.Tags, " ") != "work ideas" {
+		t.Fatalf("tags = %v (status %q)", n.Tags, m.status)
+	}
+	if m.selected() == nil || m.selected().ID != "plan" {
+		t.Fatalf("selection moved to %+v", m.selected())
+	}
+
+	keys("L")
+	if m.mode != modeCommand || m.cmdInput.Value() != "link " {
+		t.Fatalf("L: mode %v, input %q", m.mode, m.cmdInput.Value())
+	}
+	keys("groc")
+	enter()
+	if n, _ := st.Get(notes.KindPage, "plan"); m.isErr || !strings.Contains(n.Body, "## Links\n\n- [Groceries](../pages/groceries.md)") {
+		t.Fatalf("body = %q (status %q)", n.Body, m.status)
+	}
+	m.selectKey("page/groceries")
+	if !strings.Contains(m.view.View(), "Linked from (1)") {
+		t.Errorf("groceries preview lacks the backlink:\n%s", m.view.View())
+	}
+}

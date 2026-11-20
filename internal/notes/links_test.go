@@ -95,3 +95,66 @@ func TestEnsure(t *testing.T) {
 		t.Error("bad journal id accepted")
 	}
 }
+
+func TestAddLink(t *testing.T) {
+	s := New(t.TempDir())
+	if err := s.Init(); err != nil {
+		t.Fatal(err)
+	}
+	mk := func(title, body string) *Note {
+		n, err := s.Create(KindPage, title, nil, body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	mk("Groceries", "milk\n")
+	mk("Ideas", "x\n")
+	a := mk("Plan", "# Plan\n\nsome text\n")
+	body := func() string {
+		n, err := s.Get(KindPage, a.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return n.Body
+	}
+
+	if _, added, err := s.AddLink(KindPage, "plan", KindPage, "groceries", "Groceries"); err != nil || !added {
+		t.Fatalf("first link: added=%v err=%v", added, err)
+	}
+	want := "# Plan\n\nsome text\n\n## Links\n\n- [Groceries](../pages/groceries.md)\n"
+	if got := body(); got != want {
+		t.Errorf("new section:\n%q\nwant\n%q", got, want)
+	}
+	s.AddLink(KindPage, "plan", KindPage, "ideas", "Ideas")
+	want = "# Plan\n\nsome text\n\n## Links\n\n- [Groceries](../pages/groceries.md)\n- [Ideas](../pages/ideas.md)\n"
+	if got := body(); got != want {
+		t.Errorf("second link:\n%q\nwant\n%q", got, want)
+	}
+	if _, added, err := s.AddLink(KindPage, "plan", KindPage, "ideas", "Ideas"); err != nil || added {
+		t.Errorf("duplicate: added=%v err=%v", added, err)
+	}
+	if _, _, err := s.AddLink(KindPage, "plan", KindPage, "plan", "Plan"); err == nil {
+		t.Error("self-link was allowed")
+	}
+	bl, err := s.Backlinks(KindPage, "ideas")
+	if err != nil || len(bl) != 1 || bl[0].Note.ID != "plan" {
+		t.Errorf("backlinks = %+v, %v", bl, err)
+	}
+}
+
+func TestAddLinkLine(t *testing.T) {
+	item := "- [B](../pages/b.md)"
+	for _, c := range []struct{ name, in, want string }{
+		{"empty", "", "## Links\n\n" + item + "\n"},
+		{"section then heading", "# T\n\n## Links\n\n- [A](../pages/a.md)\n\n## Later\n\ntext\n",
+			"# T\n\n## Links\n\n- [A](../pages/a.md)\n" + item + "\n\n## Later\n\ntext\n"},
+		{"empty section then heading", "## Links\n## Later\n", "## Links\n\n" + item + "\n\n## Later\n"},
+		{"subheading stays inside", "## Links\n\n### Work\n- [A](../pages/a.md)\n", "## Links\n\n### Work\n- [A](../pages/a.md)\n" + item + "\n"},
+		{"heading in a fence", "```\n## Links\n```\n", "```\n## Links\n```\n\n## Links\n\n" + item + "\n"},
+	} {
+		if got := addLinkLine(c.in, item); got != c.want {
+			t.Errorf("%s:\n%q\nwant\n%q", c.name, got, c.want)
+		}
+	}
+}

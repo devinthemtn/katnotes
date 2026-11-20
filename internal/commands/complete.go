@@ -2,6 +2,7 @@ package commands
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -152,7 +153,11 @@ func completeArg(env *Env, input string, spec *Spec, rest []token, trailing bool
 	q := strings.ToLower(strings.TrimSpace(strings.Trim(frag, `"`)))
 	var matched []Suggestion
 	if arg.Kind == ArgNote && arg.complete == nil {
-		matched = noteSuggestions(env, q) // fuzzy, already ranked
+		skip := ""
+		if spec.Name == "link" && env.Note != nil { // a note can't link to itself
+			skip = env.Note.Key()
+		}
+		matched = noteSuggestions(env, q, skip) // fuzzy, already ranked
 	} else {
 		matched = filter(candidates(env, spec, arg, prev), q)
 	}
@@ -416,6 +421,14 @@ func programs(_ *Env, _ []string) []Suggestion {
 	return out
 }
 
+func currentTags(env *Env, _ []string) []Suggestion {
+	if env.Note == nil || len(env.Note.Tags) == 0 {
+		return nil
+	}
+	v := strings.Join(env.Note.Tags, ", ")
+	return []Suggestion{{Value: v, Label: v, Detail: "current tags"}}
+}
+
 func currentTitle(env *Env, _ []string) []Suggestion {
 	if env.Note == nil {
 		return nil
@@ -426,13 +439,17 @@ func currentTitle(env *Env, _ []string) []Suggestion {
 // noteSuggestions completes a note title: a fuzzy name search (title or
 // filename), or, for an empty query, the recently opened notes first and
 // then the most recently modified ones. This is also the quick-open list.
-func noteSuggestions(env *Env, q string) []Suggestion {
+// The note with key skip is left out.
+func noteSuggestions(env *Env, q, skip string) []Suggestion {
 	ms, err := env.Store.Find(notes.FindQuery{Mode: notes.SearchName, Text: q})
 	if err != nil {
 		return nil
 	}
 	sug := func(n *notes.Note, detail string) Suggestion {
 		return Suggestion{Value: n.Title, Label: n.Title, Detail: detail}
+	}
+	if skip != "" {
+		ms = slices.DeleteFunc(ms, func(m notes.Match) bool { return m.Note.Key() == skip })
 	}
 	var out []Suggestion
 	if q == "" {

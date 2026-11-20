@@ -305,3 +305,103 @@ func (s *Store) Ensure(kind Kind, id, title string) (n *Note, created bool, err 
 	n.Snippet = snippet(n.Body)
 	return n, true, nil
 }
+
+// LinksHeading is the section AddLink puts links under.
+const LinksHeading = "## Links"
+
+// AddLink adds a link to to/toID, as a list item under the "## Links"
+// section of the note from/fromID, creating the section at the end of the
+// body when there isn't one. text is the link text. It returns the saved
+// note and whether it changed (false when the note already links there).
+func (s *Store) AddLink(from Kind, fromID string, to Kind, toID, text string) (*Note, bool, error) {
+	if from == to && fromID == toID {
+		return nil, false, errors.New("link: a note can't link to itself")
+	}
+	if err := s.check(to, toID); err != nil {
+		return nil, false, err
+	}
+	n, err := s.Get(from, fromID)
+	if err != nil {
+		return nil, false, err
+	}
+	for _, l := range ParseLinks(n) {
+		if l.Kind == to && l.ID == toID {
+			return n, false, nil
+		}
+	}
+	n.Body = addLinkLine(n.Body, "- "+LinkMarkdown(to, toID, text))
+	if err := s.Save(n); err != nil {
+		return nil, false, err
+	}
+	return n, true, nil
+}
+
+// addLinkLine inserts item at the end of body's "## Links" section, or
+// appends the section with item when body has none.
+func addLinkLine(body, item string) string {
+	lines := strings.Split(strings.TrimRight(body, "\n"), "\n")
+	if len(lines) == 1 && lines[0] == "" {
+		lines = nil
+	}
+	start, fence := -1, ""
+	end := len(lines)
+	for i, line := range lines {
+		t := strings.TrimSpace(line)
+		if strings.HasPrefix(t, "```") || strings.HasPrefix(t, "~~~") {
+			if f := t[:3]; fence == "" {
+				fence = f
+			} else if f == fence {
+				fence = ""
+			}
+			continue
+		}
+		if fence != "" || !strings.HasPrefix(t, "#") {
+			continue
+		}
+		if start < 0 {
+			if strings.EqualFold(strings.TrimRight(t, " #"), LinksHeading) {
+				start = i
+			}
+		} else if headingLevel(t) <= 2 {
+			end = i
+			break
+		}
+	}
+	if start < 0 {
+		out := strings.Join(lines, "\n")
+		if out != "" {
+			out += "\n\n"
+		}
+		return out + LinksHeading + "\n\n" + item + "\n"
+	}
+	// After the section's last non-blank line.
+	at := end
+	for at > start+1 && strings.TrimSpace(lines[at-1]) == "" {
+		at--
+	}
+	ins := []string{item}
+	if at == start+1 {
+		ins = []string{"", item} // blank line after the heading
+	}
+	if at < len(lines) {
+		ins = append(ins, "") // keep a blank line before the next heading
+		for at < end && strings.TrimSpace(lines[at]) == "" {
+			lines = append(lines[:at], lines[at+1:]...)
+			end--
+		}
+	}
+	lines = append(lines[:at], append(ins, lines[at:]...)...)
+	return strings.Join(lines, "\n") + "\n"
+}
+
+// headingLevel is the number of leading #s of an ATX heading (7 when t isn't one).
+func headingLevel(t string) int {
+	n := 0
+	for n < len(t) && t[n] == '#' {
+		n++
+	}
+	if n == 0 || n > 6 || (n < len(t) && t[n] != ' ') {
+		return 7
+	}
+	return n
+}

@@ -2,9 +2,11 @@ package commands
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/devinthemtn/katnotes/internal/notes"
 	"github.com/devinthemtn/katnotes/internal/recent"
@@ -260,6 +262,48 @@ func runRename(env *Env, args []string) (Result, error) {
 	recent.Rename(env.recentPath(), env.Note.Key(), n.Key()) //nolint:errcheck // a convenience
 	return Result{Note: n, Changed: true, Relinked: relinked,
 		Status: "renamed to " + n.Key() + relinkedText(relinked)}, nil
+}
+
+// runTags replaces the note's tags with a comma or space separated list;
+// an empty one clears them.
+func runTags(env *Env, args []string) (Result, error) {
+	n, err := env.Store.Get(env.Note.Kind, env.Note.ID)
+	if err != nil {
+		return Result{}, err
+	}
+	var raw []string
+	if len(args) > 0 {
+		raw = strings.FieldsFunc(args[0], func(r rune) bool { return r == ',' || unicode.IsSpace(r) })
+	}
+	tags := notes.NormalizeTags(raw)
+	if slices.Equal(tags, notes.NormalizeTags(n.Tags)) {
+		return Result{Note: n, Status: "tags unchanged"}, nil
+	}
+	n.Tags = tags
+	if err := env.Store.Save(n); err != nil {
+		return Result{}, err
+	}
+	status := "cleared the tags of " + n.Key()
+	if len(tags) > 0 {
+		status = "tags for " + n.Key() + ": " + hashTags(tags)
+	}
+	return Result{Note: n, Changed: true, Status: status}, nil
+}
+
+// runLink adds a link to another note under the note's "## Links" section.
+func runLink(env *Env, args []string) (Result, error) {
+	to, err := ResolveNote(env.Store, args[0])
+	if err != nil {
+		return Result{}, err
+	}
+	n, added, err := env.Store.AddLink(env.Note.Kind, env.Note.ID, to.Kind, to.ID, to.Title)
+	if err != nil {
+		return Result{}, err
+	}
+	if !added {
+		return Result{Note: n, Status: n.Key() + " already links to " + to.Key()}, nil
+	}
+	return Result{Note: n, Changed: true, Status: "linked " + n.Key() + " → " + to.Key()}, nil
 }
 
 func runCopyLink(env *Env, _ []string) (Result, error) {

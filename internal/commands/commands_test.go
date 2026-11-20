@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -168,6 +169,25 @@ func TestRunNoteActions(t *testing.T) {
 	}
 	if _, err := Run(env, "tag rm zzz"); err == nil {
 		t.Error("removing a missing tag succeeded")
+	}
+	run("tags work, #Ideas  b")
+	if got := env.Note.Tags; !reflect.DeepEqual(got, []string{"work", "ideas", "b"}) {
+		t.Fatalf("tags = %v", got)
+	}
+	run("tags")
+	if got := env.Note.Tags; len(got) != 0 {
+		t.Fatalf("tags after clearing = %v", got)
+	}
+	run("tags b c")
+	run("link Linker")
+	if bl, _ := env.Store.Backlinks(notes.KindPage, "linker"); len(bl) != 1 || bl[0].Note.ID != "target" {
+		t.Fatalf("backlinks of linker = %+v", bl)
+	}
+	if r := run("link Linker"); r.Changed {
+		t.Error("linking twice changed the note")
+	}
+	if got := values(Complete(env, "link ")); slices.Contains(got, "Target") {
+		t.Errorf("link completion offers the note itself: %v", got)
 	}
 	run("set status in progress")
 	run("set rating 3")

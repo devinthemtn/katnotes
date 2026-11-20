@@ -80,6 +80,7 @@ const (
 	inTag
 	inRename
 	inDue
+	inTags
 )
 
 // list items
@@ -929,6 +930,14 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "t":
 		return m, m.startInput(inTag, "Filter by tag (empty clears): ", m.tagFilter)
+	case "T":
+		if n := m.selected(); n != nil {
+			return m, m.startInput(inTags, "Tags for "+n.Title+" (comma separated, empty clears): ", strings.Join(n.Tags, ", "))
+		}
+		m.setErr(fmt.Errorf("tags: select a note first"))
+		return m, nil
+	case "L":
+		return m, m.openLinkPicker()
 	case "J", "ctrl+j":
 		n, created, err := m.app.Store.Today()
 		if err != nil {
@@ -1232,6 +1241,12 @@ func (m model) submit(val string) (tea.Model, tea.Cmd) {
 		m.reload()
 		m.selectKey(n.Key())
 		return m, m.editCmd(n)
+	case inTags:
+		if m.selected() == nil {
+			return m, nil
+		}
+		r, err := commands.Run(m.cmdEnv(), "tags "+val)
+		return m, m.applyResult("", r, err)
 	case inTag:
 		m.tagFilter = strings.ToLower(strings.TrimPrefix(val, "#"))
 		m.list.Select(0)
@@ -1369,7 +1384,7 @@ func (m model) View() string {
 	if m.mode == modeHelp {
 		return m.helpView()
 	}
-	help := statusStyle.Render(": commands · ? help · n new · enter/e edit · p preview · r rename · dd delete · J today · / search · t tag · tab switch · ctrl+e/y scroll · q quit")
+	help := statusStyle.Render(": commands · ? help · n new · enter/e edit · p preview · r rename · T tags · L link · dd delete · J today · / search · t tag · tab switch · ctrl+e/y scroll · q quit")
 	if m.tab == tabTasks {
 		view := "v all tasks"
 		if m.allTasks {
@@ -1415,6 +1430,8 @@ var helpSections = []struct {
 		{"J / ctrl+j", "open today's journal"},
 		{"R", "reload from disk"},
 		{"F", "show or collapse the frontmatter above the preview"},
+		{"T", "edit the note's tags (comma separated)"},
+		{"L", "link the note to another one (added under ## Links)"},
 	}},
 	{"Tasks tab", []helpEntry{
 		{"v", "switch: notes with tasks / all tasks"},
