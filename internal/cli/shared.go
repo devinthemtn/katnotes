@@ -124,7 +124,7 @@ func journalCmd(a *App) *cobra.Command {
 	var noEdit bool
 	cmd := &cobra.Command{
 		Use:   "journal [date]",
-		Short: "Open (creating if needed) a journal day: today, yesterday, tomorrow, +N, -N or YYYY-MM-DD",
+		Short: "Open (creating if needed) a journal day: today, yesterday, tomorrow, +N, -N, YYYY-MM-DD or a date as date_format",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if noEdit || a.jsonOut {

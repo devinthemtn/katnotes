@@ -32,6 +32,8 @@ type Info struct {
 	NotesDir   string `json:"notesDir"`
 	ConfigPath string `json:"configPath"`
 	Version    string `json:"version"`
+	// DatePattern is the date_format setting for people, e.g. DD/MM/YYYY.
+	DatePattern string `json:"datePattern"`
 }
 
 // NewNotesService loads the config and prepares the notes directory.
@@ -79,7 +81,7 @@ func (s *NotesService) Info() Info {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	p, _ := config.Path()
-	return Info{NotesDir: s.store.Root, ConfigPath: p, Version: version}
+	return Info{NotesDir: s.store.Root, ConfigPath: p, Version: version, DatePattern: notes.DatePattern(s.store.DateFormat)}
 }
 
 // List returns notes of a kind ("page", "journal", or "" for all), optionally
@@ -112,8 +114,8 @@ func (s *NotesService) Get(kind, id string) (*notes.Note, error) {
 	return st.Get(k, id)
 }
 
-// Create makes a new note. For journal entries title is an optional
-// YYYY-MM-DD date.
+// Create makes a new note. For journal entries title is an optional date,
+// YYYY-MM-DD or in the date_format setting.
 func (s *NotesService) Create(kind, title string, tags []string) (*notes.Note, error) {
 	st := s.lock()
 	defer s.mu.Unlock()

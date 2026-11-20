@@ -3,6 +3,7 @@
   import Modal from './Modal.svelte';
   let {
     journal,
+    datePattern = 'YYYY-MM-DD',
     templates,
     tagFilter,
     title = $bindable(''),
@@ -11,6 +12,7 @@
     onclose,
   }: {
     journal: boolean;
+    datePattern?: string;
     templates: string[];
     tagFilter: string;
     title: string;
@@ -25,7 +27,7 @@
 <Modal {onclose} label={journal ? 'New journal entry' : 'New page'}>
   <form onsubmit={(e) => { e.preventDefault(); oncreate(); }}>
     <h2>{journal ? 'New journal entry' : 'New page'}</h2>
-    <input bind:this={inputEl} bind:value={title} placeholder={journal ? 'YYYY-MM-DD (empty for today)' : 'Title'} />
+    <input bind:this={inputEl} bind:value={title} placeholder={journal ? `${datePattern} (empty for today)` : 'Title'} />
     {#if !journal && templates.length}
       <label class="tmpl-pick">Template
         <select bind:value={template}>

@@ -111,8 +111,9 @@ func ResolveNote(st *notes.Store, q string) (*notes.Note, error) {
 }
 
 // ParseDay reads a journal day: "", today, yesterday, tomorrow, +N / -N
-// (days from today) or a 2006-01-02 date.
-func ParseDay(now time.Time, s string) (time.Time, error) {
+// (days from today), a 2006-01-02 date or a date in format (the date_format
+// setting, e.g. dd/mm/yyyy).
+func ParseDay(now time.Time, s, format string) (time.Time, error) {
 	s = strings.ToLower(strings.TrimSpace(s))
 	switch s {
 	case "", "today":
@@ -127,10 +128,10 @@ func ParseDay(now time.Time, s string) (time.Time, error) {
 			return now.AddDate(0, 0, d), nil
 		}
 	}
-	if t, err := time.ParseInLocation(notes.JournalIDLayout, s, now.Location()); err == nil {
+	if t, err := notes.ParseDate(format, s, now.Location()); err == nil {
 		return t, nil
 	}
-	return time.Time{}, fmt.Errorf("journal: can't read %q as a day (today, yesterday, tomorrow, +N, -N or YYYY-MM-DD)", s)
+	return time.Time{}, fmt.Errorf("journal: can't read %q as a day (today, yesterday, tomorrow, +N, -N, %s or YYYY-MM-DD)", s, notes.DatePattern(format))
 }
 
 func runOpen(env *Env, args []string) (Result, error) {
@@ -154,7 +155,7 @@ func runJournal(env *Env, args []string) (Result, error) {
 	if len(args) > 0 {
 		day = args[0]
 	}
-	d, err := ParseDay(env.now(), day)
+	d, err := ParseDay(env.now(), day, env.Store.DateFormat)
 	if err != nil {
 		return Result{}, err
 	}

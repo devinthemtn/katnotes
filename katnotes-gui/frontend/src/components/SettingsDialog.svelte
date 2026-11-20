@@ -146,8 +146,9 @@
       </select>
     </label>
   </div>
-  <label>Journal title date format (Go layout)
-    <input value={cfg.date_format} onchange={(e) => onsave('date_format', val(e))} />
+  <label>Journal date format
+    <input value={cfg.date_format} placeholder="yyyy-mm-dd" onchange={(e) => onsave('date_format', val(e))} />
+    <span class="hint" style="word-break: normal">A pattern like dd/mm/yyyy, mm/dd/yyyy or dddd d mmmm yyyy (or a Go layout). Journal titles use it, and new journal entries accept dates typed that way.</span>
   </label>
   <label>Journal template
     <textarea rows="4" value={cfg.journal_template} onchange={(e) => onsave('journal_template', val(e))}></textarea>

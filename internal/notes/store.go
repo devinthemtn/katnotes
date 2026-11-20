@@ -519,7 +519,8 @@ func Slugify(title string) string {
 }
 
 // Create makes a new note. For pages the id is the slugified title; for
-// journal entries title must be a YYYY-MM-DD date (or empty for today).
+// journal entries title must be a date, YYYY-MM-DD or in the store's
+// DateFormat (or empty for today).
 func (s *Store) Create(kind Kind, title string, tags []string, body string) (*Note, error) {
 	now := s.now()
 	var id string
@@ -533,9 +534,9 @@ func (s *Store) Create(kind Kind, title string, tags []string, body string) (*No
 		d := now
 		if strings.TrimSpace(title) != "" {
 			var err error
-			d, err = time.ParseInLocation(JournalIDLayout, strings.TrimSpace(title), time.Local)
+			d, err = ParseDate(s.DateFormat, title, time.Local)
 			if err != nil {
-				return nil, fmt.Errorf("%w: journal entries are named YYYY-MM-DD", ErrInvalidID)
+				return nil, fmt.Errorf("%w: journal entries are named by date: %v", ErrInvalidID, err)
 			}
 		}
 		return s.createJournal(d, tags, body)
@@ -559,10 +560,7 @@ func (s *Store) Create(kind Kind, title string, tags []string, body string) (*No
 
 func (s *Store) createJournal(d time.Time, tags []string, body string) (*Note, error) {
 	id := d.Format(JournalIDLayout)
-	layout := s.DateFormat
-	if layout == "" {
-		layout = JournalIDLayout
-	}
+	layout := s.dateLayout()
 	now := s.now()
 	n := &Note{Kind: KindJournal, ID: id, Path: s.Path(KindJournal, id), Title: d.Format(layout),
 		Tags: NormalizeTags(tags), Created: now, Updated: now, Body: body}
@@ -589,10 +587,7 @@ func (s *Store) renderJournal(d time.Time) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("journal template: %w", err)
 	}
-	layout := s.DateFormat
-	if layout == "" {
-		layout = JournalIDLayout
-	}
+	layout := s.dateLayout()
 	var buf bytes.Buffer
 	err = tmpl.Execute(&buf, map[string]string{
 		"Date":    d.Format(layout),

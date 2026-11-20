@@ -913,7 +913,7 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "n":
 		if m.tab == tabJournal {
-			return m, m.startInput(inNew, "New journal date (YYYY-MM-DD, empty = today): ", "")
+			return m, m.startInput(inNew, "New journal date ("+notes.DatePattern(m.app.Store.DateFormat)+", empty = today): ", "")
 		}
 		return m, m.startInput(inNew, "New page title: ", "")
 	case "/":

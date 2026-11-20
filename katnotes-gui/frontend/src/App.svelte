@@ -71,6 +71,7 @@
   let notesDir = $state('');
   let configPath = $state('');
   let version = $state('');
+  let datePattern = $state('YYYY-MM-DD');
 
   // modals
   let newOpen = $state(false);
@@ -769,6 +770,7 @@
     notesDir = info.notesDir;
     configPath = info.configPath;
     version = info.version;
+    datePattern = info.datePattern || 'YYYY-MM-DD';
   }
 
   // Whether the note on disk differs from the one shown. `updated` alone
@@ -2208,7 +2210,7 @@
 {/if}
 
 {#if newOpen}
-  <NewNoteDialog journal={tab === 'journal'} {templates} {tagFilter} bind:title={newTitle} bind:template={newTemplate}
+  <NewNoteDialog journal={tab === 'journal'} {datePattern} {templates} {tagFilter} bind:title={newTitle} bind:template={newTemplate}
     oncreate={createNote} onclose={() => (newOpen = false)} />
 {/if}
 

@@ -95,10 +95,7 @@ func (s *Store) CreateFromTemplate(title, src string, tags []string) (*Note, err
 		return nil, fmt.Errorf("template: %w", err)
 	}
 	now := s.now()
-	layout := s.DateFormat
-	if layout == "" {
-		layout = JournalIDLayout
-	}
+	layout := s.dateLayout()
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, map[string]string{
 		"Title":   title,

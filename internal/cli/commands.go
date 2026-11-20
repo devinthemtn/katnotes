@@ -43,7 +43,7 @@ func newCmd(a *App) *cobra.Command {
 	var body, tmpl string
 	cmd := &cobra.Command{
 		Use:   "new [title]",
-		Short: "Create a page (or a journal entry with -j; title is then an optional YYYY-MM-DD date)",
+		Short: "Create a page (or a journal entry with -j; title is then an optional date, YYYY-MM-DD or as date_format)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			kind := notes.Kind(a.Cfg.DefaultKind)
 			if j, _ := cmd.Flags().GetBool("journal"); j {

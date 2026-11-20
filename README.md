@@ -56,7 +56,7 @@ previewer = ""              # TUI "o": Markdown viewer, e.g. "katdown" or "glow 
 previewer_mode = "auto"     # auto (glow/mdcat/bat/less… use the terminal, others open a window), terminal or window
 default_kind = "page"       # what `katnotes new` makes
 journal_template = "# {{.Date}}\n\n"   # fields: .Date .ID .Weekday .Time
-date_format = "2006-01-02"  # Go time layout for journal titles
+date_format = "yyyy-mm-dd"  # journal titles, and dates typed for new entries: dd/mm/yyyy, mm/dd/yyyy, dddd d mmmm yyyy… (or a Go layout)
 task_done_date = true       # checking a task adds {done:YYYY-MM-DD}
 
 start_page = "none"         # none, last, today, page/<id> or journal/<id> (last: the latest note opened in either app)

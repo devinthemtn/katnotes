@@ -12,6 +12,8 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
+
+	"github.com/devinthemtn/katnotes/internal/notes"
 )
 
 // AppName is the directory name used under the user's config dir.
@@ -274,6 +276,10 @@ func Set(key, value string) error {
 	case "journal_template":
 		cfg.JournalTemplate = strings.ReplaceAll(value, `\n`, "\n")
 	case "date_format":
+		value = strings.TrimSpace(value)
+		if _, err := notes.JournalLayout(value); err != nil {
+			return err
+		}
 		cfg.DateFormat = value
 	case "open_with":
 		cfg.OpenWith = strings.TrimSpace(value)
