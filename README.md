@@ -145,6 +145,7 @@ Call about [Groceries](../pages/groceries.md) — see [2026-11-17](../journal/20
 ```
 
 - **GUI:** type `[[` in the editor to open a picker of pages and journal days. It also reads dates, so `[[today` or `[[fri` gives that journal day. Pick a note, or choose **New page "…"**, and the link is written for you.
+- **Quick link:** press `L` (TUI or GUI; Ctrl+Shift+L while typing in the GUI) or run `:link <note>`, pick a note, and `- [Title](…)` is added under a `## Links` section at the end of the note, created the first time.
 - **Preview:** click a link to open the note. Links to notes that don't exist yet are shown dashed, and clicking one creates the note.
 - **Backlinks:** a **Linked from** panel under each note (GUI) and a footer in the TUI preview list the notes that link to it. Each entry shows the linking line.
 - **Renaming** a page rewrites the links to it in every other note. Link text that matched the old title becomes the new title.
@@ -249,6 +250,8 @@ If a note is changed outside the app (by the CLI, the TUI or another editor), th
 | Ctrl+1 … Ctrl+4 | Pages, Journal, Tags and Tasks tabs |
 | Ctrl+E | cycle edit, split and preview |
 | `[[` | link to a page or journal day (picker; saved as a Markdown link) |
+| `L` / Ctrl+Shift+L | link the note to another: pick it, and `- [Title](…)` is added under `## Links` (`L` outside text fields) |
+| `T` / Ctrl+Shift+G | edit the note's tags, comma separated; Enter saves (`T` outside text fields) |
 | Ctrl+Enter | make the line a task, or check/uncheck it |
 | Ctrl+Shift+K | delete the line (or every line in the selection) |
 | Enter | on a list item or task: continue the list below, with the same bullet, the next number, or a new unchecked box (Shift+Enter for a plain new line); on an empty item: remove it |

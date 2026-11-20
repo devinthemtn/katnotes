@@ -226,6 +226,8 @@
       [`${modLabel}+Shift+K`, 'In the editor: delete the line (or every line in the selection)'],
       ['Enter', 'On a list item or task: continue the list below; on an empty one: remove it'],
       ['[[', 'In the editor: link to a page or journal day; saved as a Markdown link'],
+      [`L / ${modLabel}+Shift+L`, 'Link the note to another: pick it, and the link is added under ## Links (L outside text fields)'],
+      [`T / ${modLabel}+Shift+G`, 'Edit the note’s tags, comma separated (T outside text fields)'],
       ['Click a link', 'In the preview: open the note (a missing one is created first)'],
       ['{', 'On a task line: start a {key:value} block; suggests due, pri, start and your keys, then values'],
       ['Ctrl+Space', 'On a task line: open the {…} suggestions (adds the block if needed)'],
@@ -263,6 +265,7 @@
   let searchEl: HTMLInputElement | undefined = $state();
   let bodyEl: HTMLTextAreaElement | undefined = $state();
   let titleEl: HTMLInputElement | undefined = $state();
+  let tagsEl: HTMLInputElement | undefined = $state();
 
   let saveTimer: ReturnType<typeof setTimeout> | undefined;
   let searchTimer: ReturnType<typeof setTimeout> | undefined;
@@ -993,6 +996,23 @@
     await setCmdInput('open ');
   }
 
+  // The TUI's T: edit the note's tags (the box in the note header, or
+  // ":tags …" when the header is hidden).
+  async function editTags() {
+    if (!current) { flash('tags: open a note first', true); return; }
+    if (tagsEl && mainView === 'note') { tagsEl.focus(); tagsEl.select(); return; }
+    await openPalette();
+    await setCmdInput('tags ' + parseTags(draftTags).join(', '));
+  }
+
+  // The TUI's L: pick a note and add a link to it under "## Links".
+  async function openLinkPicker() {
+    if (!current) { flash('link: open a note first', true); return; }
+    await openPalette();
+    cmdQuick = true;
+    await setCmdInput('link ');
+  }
+
   async function openPalette() {
     cmdQuick = false;
     cmdPick = null;
@@ -1374,6 +1394,8 @@
         '/': () => { searchEl?.focus(); searchEl?.select(); },
         ':': () => { if (!cmdOpen) openPalette(); },
         J: () => openToday(),
+        T: () => editTags(),
+        L: () => openLinkPicker(),
       };
       const act = bare[e.key];
       if (act) { e.preventDefault(); act(); return; }
@@ -1394,6 +1416,16 @@
       if (k === 't') {
         e.preventDefault();
         toggleTasksView();
+        return;
+      }
+      if (k === 'l') {
+        e.preventDefault();
+        openLinkPicker();
+        return;
+      }
+      if (k === 'g') {
+        e.preventDefault();
+        editTags();
         return;
       }
     }
@@ -2000,9 +2032,11 @@
           <span class="kind">{current.kind}/{current.id}</span>
           <input
             class="tags-input"
+            bind:this={tagsEl}
             placeholder="tags, comma separated"
             bind:value={draftTags}
             oninput={onEdit}
+            onkeydown={(e) => { if (e.key === 'Enter') { (e.target as HTMLInputElement).blur(); flushSave(); } }}
           />
           <div class="seg">
             <button class:active={viewMode === 'edit'} onclick={() => setView('edit')}>Edit</button>
