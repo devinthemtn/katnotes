@@ -310,7 +310,7 @@ return {
 ## Errors and debugging
 
 - Call `error("message")` to stop and show `message`. Runtime errors are shown the same way, with the file name and line number.
-- A script that runs too long is stopped with `<name>.lua: timed out`.
+- A script that runs too long is stopped with `<name>.lua: timed out after <limit>`, e.g. `after 2s`, or `after 1m0s` for a `:` command with `timeout = 60`.
 - `print` output isn't shown anywhere. To inspect a value, return it:
 
   ```lua

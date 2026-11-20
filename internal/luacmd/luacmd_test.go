@@ -65,6 +65,14 @@ func TestListAndRun(t *testing.T) {
 	if _, err := Run(dir, "loop", ctx); err == nil || !strings.Contains(err.Error(), "timed out") {
 		t.Errorf("loop err = %v", err)
 	}
+	// The message names the limit the script actually had.
+	write(t, dir, "own.lua", `return { timeout = 0.3, run = function(ctx) while true do end end }`)
+	if _, err := Run(dir, "own", Context{Source: SourceCommand}); err == nil || !strings.Contains(err.Error(), "own.lua: timed out after 300ms") {
+		t.Errorf("own timeout from command window: err = %v", err)
+	}
+	if _, err := Run(dir, "own", Context{Source: SourceSlash}); err == nil || !strings.Contains(err.Error(), "own.lua: timed out after 200ms") {
+		t.Errorf("own timeout from / menu: err = %v", err)
+	}
 	if _, err := Run(dir, "../x", ctx); err == nil {
 		t.Error("path traversal accepted")
 	}

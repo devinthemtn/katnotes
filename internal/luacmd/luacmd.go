@@ -176,7 +176,7 @@ func options(tbl *lua.LTable) (long bool, timeout time.Duration) {
 // module runs the file and returns the table it returns.
 func module(L *lua.LState, path string) (*lua.LTable, error) {
 	if err := L.DoFile(path); err != nil {
-		return nil, scriptErr(path, err)
+		return nil, scriptErr(path, err, Timeout) // the file runs before any extend
 	}
 	tbl, ok := L.Get(-1).(*lua.LTable)
 	if !ok {
@@ -218,11 +218,13 @@ func Run(dir, name string, c Context) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	limit := Timeout
 	if _, timeout := options(tbl); timeout > 0 && c.Source == SourceCommand {
-		extend(timeout)
+		limit = timeout
+		extend(limit)
 	}
 	if err := L.CallByParam(lua.P{Fn: tbl.RawGetString("run"), NRet: 1, Protect: true}, contextTable(L, c)); err != nil {
-		return Result{}, scriptErr(path, err)
+		return Result{}, scriptErr(path, err, limit)
 	}
 	ret := L.Get(-1)
 	switch v := ret.(type) {
@@ -278,9 +280,11 @@ func contextTable(L *lua.LState, c Context) *lua.LTable {
 	return t
 }
 
-func scriptErr(path string, err error) error {
+// scriptErr tidies a Lua error. limit is the time the script was allowed,
+// for the timeout message.
+func scriptErr(path string, err error, limit time.Duration) error {
 	if errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "context deadline exceeded") {
-		return fmt.Errorf("%s: timed out after %s", filepath.Base(path), Timeout)
+		return fmt.Errorf("%s: timed out after %s", filepath.Base(path), limit)
 	}
 	var ae *lua.ApiError
 	if errors.As(err, &ae) {
