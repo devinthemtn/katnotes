@@ -121,6 +121,23 @@ func Path() (string, error) {
 	return filepath.Join(d, "config.toml"), nil
 }
 
+// EditTarget returns what ":config" opens in an editor: config.toml, or the
+// config directory when dir is set. The directory is created if missing so
+// the editor can save a new config.toml.
+func EditTarget(dir bool) (string, error) {
+	d, err := Dir()
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(d, 0o755); err != nil {
+		return "", err
+	}
+	if dir {
+		return d, nil
+	}
+	return filepath.Join(d, "config.toml"), nil
+}
+
 // Load reads the config file, filling missing values with defaults. A missing
 // file is not an error. NotesDir is returned with ~ expanded and the
 // KATNOTES_DIR override applied.

@@ -14,6 +14,8 @@ import (
 	"github.com/muesli/termenv"
 
 	"github.com/devinthemtn/katnotes/internal/commands"
+	"github.com/devinthemtn/katnotes/internal/config"
+	"github.com/devinthemtn/katnotes/internal/editor"
 )
 
 // The ":" command window. Commands, their arguments and completion come from
@@ -32,7 +34,9 @@ var tuiActions = map[string]func(m *model, r commands.Result) tea.Cmd{
 		m.switchTab(tabTasks)
 		return nil
 	},
-	"terminal": func(m *model, _ commands.Result) tea.Cmd { return m.shellCmd() },
+	"terminal":   func(m *model, _ commands.Result) tea.Cmd { return m.shellCmd() },
+	"config":     func(m *model, _ commands.Result) tea.Cmd { return m.editConfigCmd(false) },
+	"config-dir": func(m *model, _ commands.Result) tea.Cmd { return m.editConfigCmd(true) },
 	"theme": func(m *model, r commands.Result) tea.Cmd {
 		if len(r.Args) == 1 {
 			m.switchTheme(r.Args[0])
@@ -421,6 +425,29 @@ func (m *model) shellCmd() tea.Cmd {
 	c := exec.Command(sh)
 	c.Dir = dir
 	return tea.ExecProcess(c, func(err error) tea.Msg { return shellDoneMsg{err} })
+}
+
+// editConfigCmd opens config.toml (dir: the config folder) in the editor.
+// The config folder is created first so the editor can save a new file.
+func (m *model) editConfigCmd(dir bool) tea.Cmd {
+	path, err := config.EditTarget(dir)
+	if err != nil {
+		m.setErr(fmt.Errorf("config: %w", err))
+		return nil
+	}
+	c, err := editor.Command(m.app.Cfg.Editor, path)
+	if err != nil {
+		m.setErr(err)
+		return nil
+	}
+	return tea.ExecProcess(c, func(err error) tea.Msg { return configEditedMsg{path: path, err: err} })
+}
+
+// configEditedMsg reports that the editor opened by ":config" or
+// ":config-dir" exited.
+type configEditedMsg struct {
+	path string
+	err  error
 }
 
 // shellDoneMsg reports that the ":terminal" shell exited.

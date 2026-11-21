@@ -899,6 +899,15 @@
     }
   }
 
+  async function editConfig(dir: boolean) {
+    try {
+      const path = await api.EditConfig(dir);
+      flash(dir ? `opened ${path}` : `opened ${path} · :reload after saving`);
+    } catch (e) {
+      flash(errMsg(e), true);
+    }
+  }
+
   // The command catalog, argument parsing and completion live in Go
   // (internal/commands, shared with the TUI). This side draws the palette,
   // applies results, and performs the UI-only commands.
@@ -913,6 +922,8 @@
     zoom: toggleZoom,
     external: openExternal,
     terminal: openTerminal,
+    config: () => editConfig(false),
+    'config-dir': () => editConfig(true),
     theme: async (r) => {
       try {
         const c = await api.ReloadConfig();

@@ -398,6 +398,20 @@ func (s *NotesService) Theme(systemDark bool) ThemeInfo {
 	return info
 }
 
+// EditConfig opens config.toml (dir: the config folder) in the editor
+// option, $VISUAL or $EDITOR, and returns the path it opened. Terminal
+// editors run in a new terminal window.
+func (s *NotesService) EditConfig(dir bool) (string, error) {
+	s.mu.Lock()
+	configured := s.cfg.Editor
+	s.mu.Unlock()
+	path, err := config.EditTarget(dir)
+	if err != nil {
+		return "", err
+	}
+	return path, openInEditor(configured, path)
+}
+
 // ReloadConfig re-reads config.toml, picking up hand edits without a restart.
 func (s *NotesService) ReloadConfig() (config.Config, error) {
 	s.mu.Lock()

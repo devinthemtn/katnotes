@@ -818,6 +818,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.resetCache()
 		m.reload()
 		return m, nil
+	case configEditedMsg:
+		if msg.err != nil {
+			m.setErr(fmt.Errorf("editor: %w", msg.err))
+		} else {
+			m.setStatus("closed " + msg.path + " · restart KatNotes to apply config changes")
+		}
+		return m, nil
 	case previewedMsg:
 		if msg.err != nil {
 			m.setErr(fmt.Errorf("previewer: %w", msg.err))

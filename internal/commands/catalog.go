@@ -274,6 +274,8 @@ func init() {
 		{Name: "theme", Desc: "Set this app's colour theme (auto, light, dark, a file in themes/, or shared)", Args: []Arg{
 			{Name: "theme", Kind: ArgText, Optional: true, complete: themes},
 		}, run: runTheme},
+		{Name: "config", Desc: "Edit config.toml in your editor (:reload after saving in the GUI)", UI: true},
+		{Name: "config-dir", Desc: "Open the config folder (themes, templates, Lua commands) in your editor", UI: true},
 		{Name: "zoom", Desc: "Toggle focus mode (hide sidebar and top bar)", UI: true, Apps: []string{AppGUI}},
 		{Name: "reload", Desc: "Reload notes from disk", UI: true, Apps: []string{AppTUI}},
 		{Name: "reload", Desc: "Reload config.toml and Lua commands", UI: true, Apps: []string{AppGUI}},

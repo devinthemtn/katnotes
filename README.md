@@ -335,6 +335,8 @@ return {
 | `sync` | git: commit every change in the notes folder, then pull (rebase) and push if the branch has an upstream |
 | `git status` | git: the notes changed since the last commit |
 | `theme [name]` | set this app's colour theme (`auto`, `light`, `dark`, your own, or `shared` to follow the `theme` option; see Themes); with no name, show the current one |
+| `config` | open `config.toml` in your editor (`editor`, then `$VISUAL`, `$EDITOR`); in the GUI a terminal editor gets a new terminal window and `:reload` applies your changes, the TUI needs a restart |
+| `config-dir` | open the config folder (themes, templates, Lua commands) in your editor, the same way |
 | `sync-tasks`, `terminal`, `reload`, `help` | as in each app; the GUI also has `zoom`, the TUI `quit` |
 
 Tab completes the command and then each argument: note titles, tags in use (tags the note already has are left out), frontmatter fields and values already used in other notes, and journal days. ↑↓ choose a suggestion, and Enter runs the line. If you picked a suggestion with ↑↓, Enter uses it.

@@ -78,6 +78,13 @@ func TestParse(t *testing.T) {
 	if _, err := Parse(AppTUI, "external"); err != nil {
 		t.Errorf("external in the TUI: %v", err)
 	}
+	for _, app := range []string{AppTUI, AppGUI} {
+		for _, name := range []string{"config", "config-dir"} {
+			if r, err := Run(&Env{App: app}, name); err != nil || r.UI != name {
+				t.Errorf("%s in %s: %+v, %v", name, app, r, err)
+			}
+		}
+	}
 	if _, err := Parse(AppGUI, "zoom"); err != nil {
 		t.Errorf("zoom in the GUI: %v", err)
 	}

@@ -45,6 +45,20 @@ func openWith(cmdline, path string) error {
 	return start(exec.Command(argv[0], argv[1:]...))
 }
 
+// openInEditor opens path in the user's editor (see editor.Resolve):
+// terminal editors in a new terminal window, others detached.
+func openInEditor(configured, path string) error {
+	argv, err := editor.Resolve(configured)
+	if err != nil {
+		return err
+	}
+	argv = append(argv, path)
+	if term, _ := editor.InTerminal(argv[0]); term {
+		return runInTerminal(filepath.Dir(path), argv)
+	}
+	return start(exec.Command(argv[0], argv[1:]...))
+}
+
 // runInTerminal opens a terminal window in dir running argv, or the user's
 // shell when argv is empty.
 func runInTerminal(dir string, argv []string) error {

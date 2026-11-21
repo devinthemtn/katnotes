@@ -166,3 +166,18 @@ func TestOpenWithFor(t *testing.T) {
 		t.Errorf("with tui_open_with: %+v", cfg)
 	}
 }
+
+func TestEditTarget(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "new")
+	t.Setenv(EnvConfigDir, dir)
+	p, err := EditTarget(false)
+	if err != nil || p != filepath.Join(dir, "config.toml") {
+		t.Fatalf("file: %q, %v", p, err)
+	}
+	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
+		t.Fatalf("config dir not created: %v", err)
+	}
+	if p, err := EditTarget(true); err != nil || p != dir {
+		t.Fatalf("dir: %q, %v", p, err)
+	}
+}
