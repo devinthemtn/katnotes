@@ -265,9 +265,9 @@ func runRename(env *Env, args []string) (Result, error) {
 		Status: "renamed to " + n.Key() + relinkedText(relinked)}, nil
 }
 
-// runTags replaces the note's tags with a comma or space separated list;
+// runTagSet replaces the note's tags with a comma or space separated list;
 // an empty one clears them.
-func runTags(env *Env, args []string) (Result, error) {
+func runTagSet(env *Env, args []string) (Result, error) {
 	n, err := env.Store.Get(env.Note.Kind, env.Note.ID)
 	if err != nil {
 		return Result{}, err

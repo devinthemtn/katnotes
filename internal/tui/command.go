@@ -36,7 +36,7 @@ var tuiActions = map[string]func(m *model, r commands.Result) tea.Cmd{
 	},
 	"terminal":   func(m *model, _ commands.Result) tea.Cmd { return m.shellCmd() },
 	"config":     func(m *model, _ commands.Result) tea.Cmd { return m.editConfigCmd(false) },
-	"config-dir": func(m *model, _ commands.Result) tea.Cmd { return m.editConfigCmd(true) },
+	"config dir": func(m *model, _ commands.Result) tea.Cmd { return m.editConfigCmd(true) },
 	"theme": func(m *model, r commands.Result) tea.Cmd {
 		if len(r.Args) == 1 {
 			m.switchTheme(r.Args[0])
@@ -453,7 +453,7 @@ func (m *model) editConfigCmd(dir bool) tea.Cmd {
 }
 
 // configEditedMsg reports that the editor opened by ":config" or
-// ":config-dir" exited.
+// ":config dir" exited.
 type configEditedMsg struct {
 	path string
 	err  error

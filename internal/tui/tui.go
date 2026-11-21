@@ -1443,7 +1443,7 @@ func (m model) submit(val string) (tea.Model, tea.Cmd) {
 		if m.selected() == nil {
 			return m, nil
 		}
-		r, err := commands.Run(m.cmdEnv(), "tags "+val)
+		r, err := commands.Run(m.cmdEnv(), "tag set "+val)
 		return m, m.applyResult("", r, err)
 	case inTag:
 		m.tagFilter = strings.ToLower(strings.TrimPrefix(val, "#"))

@@ -78,8 +78,11 @@ func TestParse(t *testing.T) {
 	if _, err := Parse(AppTUI, "external"); err != nil {
 		t.Errorf("external in the TUI: %v", err)
 	}
+	if _, err := Parse(AppTUI, "tags a b"); err == nil || err.Error() != "tags is now tag set" {
+		t.Errorf("renamed command: %v", err)
+	}
 	for _, app := range []string{AppTUI, AppGUI} {
-		for _, name := range []string{"config", "config-dir"} {
+		for _, name := range []string{"config", "config dir"} {
 			if r, err := Run(&Env{App: app}, name); err != nil || r.UI != name {
 				t.Errorf("%s in %s: %+v, %v", name, app, r, err)
 			}
@@ -177,15 +180,15 @@ func TestRunNoteActions(t *testing.T) {
 	if _, err := Run(env, "tag rm zzz"); err == nil {
 		t.Error("removing a missing tag succeeded")
 	}
-	run("tags work, #Ideas  b")
+	run("tag set work, #Ideas  b")
 	if got := env.Note.Tags; !reflect.DeepEqual(got, []string{"work", "ideas", "b"}) {
 		t.Fatalf("tags = %v", got)
 	}
-	run("tags")
+	run("tag set")
 	if got := env.Note.Tags; len(got) != 0 {
 		t.Fatalf("tags after clearing = %v", got)
 	}
-	run("tags b c")
+	run("tag set b c")
 	run("link Linker")
 	if bl, _ := env.Store.Backlinks(notes.KindPage, "linker"); len(bl) != 1 || bl[0].Note.ID != "target" {
 		t.Fatalf("backlinks of linker = %+v", bl)

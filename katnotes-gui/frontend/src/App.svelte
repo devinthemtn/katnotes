@@ -923,7 +923,7 @@
     external: openExternal,
     terminal: openTerminal,
     config: () => editConfig(false),
-    'config-dir': () => editConfig(true),
+    'config dir': () => editConfig(true),
     theme: async (r) => {
       try {
         const c = await api.ReloadConfig();
@@ -1010,12 +1010,12 @@
   }
 
   // The TUI's T: edit the note's tags (the box in the note header, or
-  // ":tags …" when the header is hidden).
+  // ":tag set …" when the header is hidden).
   async function editTags() {
     if (!current) { flash('tags: open a note first', true); return; }
     if (tagsEl && mainView === 'note') { tagsEl.focus(); tagsEl.select(); return; }
     await openPalette();
-    await setCmdInput('tags ' + parseTags(draftTags).join(', '));
+    await setCmdInput('tag set ' + parseTags(draftTags).join(', '));
   }
 
   // The TUI's L: pick a note and add a link to it under "## Links".

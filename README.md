@@ -320,7 +320,7 @@ return {
 | `new <title>` | create a page and start editing it |
 | `journal [day]` | open a journal day: `today` (default), `yesterday`, `tomorrow`, `-3`, `+1` or `2026-11-20` |
 | `tag add <tag…>` / `tag rm <tag…>` | add or remove tags |
-| `tags <tag, …>` | replace all of the note's tags (commas or spaces between them; no tags clears them) |
+| `tag set <tag, …>` | replace all of the note's tags (commas or spaces between them; no tags clears them) |
 | `set <field> <value>` | set a frontmatter field, adding frontmatter to files that have none. Values are YAML, so `true`, `3` and `[a, b]` keep their types; `set title …` renames, `set tags …` replaces the tags |
 | `unset <field>` | remove a frontmatter field |
 | `rename <title>` | rename the note and update links to it |
@@ -342,7 +342,7 @@ return {
 | `git status` | git: the notes changed since the last commit |
 | `theme [name]` | set this app's colour theme (`auto`, `light`, `dark`, your own, or `shared` to follow the `theme` option; see Themes); with no name, show the current one |
 | `config` | open `config.toml` in your editor (`editor`, then `$VISUAL`, `$EDITOR`); in the GUI a terminal editor gets a new terminal window and `:reload` applies your changes, the TUI needs a restart |
-| `config-dir` | open the config folder (themes, templates, Lua commands) in your editor, the same way |
+| `config dir` | open the config folder (themes, templates, Lua commands) in your editor, the same way |
 | `sync-tasks`, `terminal`, `reload`, `help` | as in each app; the GUI also has `zoom`, the TUI `quit` |
 
 Tab completes the command and then each argument: note titles, tags in use (tags the note already has are left out), frontmatter fields and values already used in other notes, and journal days. ↑↓ choose a suggestion, and Enter runs the line. If you picked a suggestion with ↑↓, Enter uses it.

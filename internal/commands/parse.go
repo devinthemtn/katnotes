@@ -76,6 +76,10 @@ type Parsed struct {
 // Vim's short names for commands, accepted as the first word.
 var aliases = map[string]string{"q": "quit", "q!": "quit", "qa": "quit", "qa!": "quit", "h": "help"}
 
+// renamed maps commands renamed in v1.0 to their new names, so the old
+// names get a pointer instead of "unknown command".
+var renamed = map[string]string{"tags": "tag set"}
+
 // Parse reads a command line ("tag add work ideas").
 func Parse(app, input string) (*Parsed, error) {
 	input = strings.TrimSpace(input)
@@ -88,6 +92,9 @@ func Parse(app, input string) (*Parsed, error) {
 	}
 	spec, n := match(app, toks)
 	if spec == nil {
+		if to := renamed[strings.ToLower(toks[0].text)]; to != "" {
+			return nil, fmt.Errorf("%s is now %s", toks[0].text, to)
+		}
 		return nil, fmt.Errorf("unknown command: %s", toks[0].text)
 	}
 	args, err := bindArgs(spec, input, toks[n:])

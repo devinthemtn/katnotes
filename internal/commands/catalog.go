@@ -235,9 +235,9 @@ func init() {
 		{Name: "journal", Desc: "Open a journal day (default today)", Args: []Arg{{Name: "date", Kind: ArgDate, Optional: true}}, run: runJournal},
 		{Name: "tag add", Desc: "Add tags to the note", NeedsNote: true, Args: []Arg{{Name: "tag", Kind: ArgTag, Many: true}}, run: runTagAdd},
 		{Name: "tag rm", Desc: "Remove tags from the note", NeedsNote: true, Args: []Arg{{Name: "tag", Kind: ArgNoteTag, Many: true}}, run: runTagRm},
-		{Name: "tags", Desc: "Replace the note's tags, e.g. tags work, ideas (empty clears)", NeedsNote: true, Args: []Arg{
+		{Name: "tag set", Desc: "Replace the note's tags, e.g. tag set work, ideas (empty clears)", NeedsNote: true, Args: []Arg{
 			{Name: "tags", Kind: ArgText, Rest: true, Optional: true, complete: currentTags},
-		}, run: runTags},
+		}, run: runTagSet},
 		{Name: "set", Desc: "Set a frontmatter field (adds frontmatter if missing)", NeedsNote: true, Args: []Arg{
 			{Name: "field", Kind: ArgField},
 			{Name: "value", Kind: ArgText, Rest: true, complete: fieldValues},
@@ -274,7 +274,7 @@ func init() {
 			{Name: "theme", Kind: ArgText, Optional: true, complete: themes},
 		}, run: runTheme},
 		{Name: "config", Desc: "Edit config.toml in your editor (:reload after saving in the GUI)", UI: true},
-		{Name: "config-dir", Desc: "Open the config folder (themes, templates, Lua commands) in your editor", UI: true},
+		{Name: "config dir", Desc: "Open the config folder (themes, templates, Lua commands) in your editor", UI: true},
 		{Name: "zoom", Desc: "Toggle focus mode (hide sidebar and top bar)", UI: true, Apps: []string{AppGUI}},
 		{Name: "reload", Desc: "Reload notes from disk", UI: true, Apps: []string{AppTUI}},
 		{Name: "reload", Desc: "Reload config.toml and Lua commands", UI: true, Apps: []string{AppGUI}},
