@@ -27,33 +27,34 @@ func openExternal(cmdline, path string) error {
 // openTerminal opens a terminal window whose working directory is dir.
 func openTerminal(dir string) error { return runInTerminal(dir, nil) }
 
-// openWith opens path once with cmdline (":open-with"). Terminal programs
-// KatNotes knows (vim, hx…) run in a new terminal window; anything else is
-// started detached, as the GUI has no terminal of its own.
+// openWith opens path once with cmdline (":open-with"). A cmdline ending
+// in "&" is always started detached.
 func openWith(cmdline, path string) error {
 	argv, detached, err := editor.ParseOpenWith(cmdline)
 	if err != nil {
 		return err
 	}
-	if _, err := exec.LookPath(argv[0]); err != nil {
-		return err
-	}
-	argv = append(argv, path)
-	if term, _ := editor.InTerminal(argv[0]); term && !detached {
-		return runInTerminal(filepath.Dir(path), argv)
-	}
-	return start(exec.Command(argv[0], argv[1:]...))
+	return launch(argv, path, detached)
 }
 
-// openInEditor opens path in the user's editor (see editor.Resolve):
-// terminal editors in a new terminal window, others detached.
+// openInEditor opens path in the user's editor (see editor.Resolve).
 func openInEditor(configured, path string) error {
 	argv, err := editor.Resolve(configured)
 	if err != nil {
 		return err
 	}
+	return launch(argv, path, false)
+}
+
+// launch runs argv with path appended. Terminal programs KatNotes knows
+// (vim, hx…) run in a new terminal window unless detached is set; anything
+// else is started detached, as the GUI has no terminal of its own.
+func launch(argv []string, path string, detached bool) error {
+	if _, err := exec.LookPath(argv[0]); err != nil {
+		return err
+	}
 	argv = append(argv, path)
-	if term, _ := editor.InTerminal(argv[0]); term {
+	if term, _ := editor.InTerminal(argv[0]); term && !detached {
 		return runInTerminal(filepath.Dir(path), argv)
 	}
 	return start(exec.Command(argv[0], argv[1:]...))
