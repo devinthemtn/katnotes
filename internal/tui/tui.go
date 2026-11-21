@@ -915,8 +915,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case configEditedMsg:
 		if msg.err != nil {
 			m.setErr(fmt.Errorf("editor: %w", msg.err))
+		} else if msg.dir {
+			m.setStatus("closed the config folder · config.toml changes apply when KatNotes restarts")
 		} else {
-			m.setStatus("closed " + msg.path + " · restart KatNotes to apply config changes")
+			m.setStatus("closed config.toml · changes apply when KatNotes restarts")
 		}
 		return m, nil
 	case previewedMsg:

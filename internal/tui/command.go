@@ -449,14 +449,14 @@ func (m *model) editConfigCmd(dir bool) tea.Cmd {
 		m.setErr(err)
 		return nil
 	}
-	return tea.ExecProcess(c, func(err error) tea.Msg { return configEditedMsg{path: path, err: err} })
+	return tea.ExecProcess(c, func(err error) tea.Msg { return configEditedMsg{dir: dir, err: err} })
 }
 
 // configEditedMsg reports that the editor opened by ":config" or
 // ":config dir" exited.
 type configEditedMsg struct {
-	path string
-	err  error
+	dir bool
+	err error
 }
 
 // shellDoneMsg reports that the ":terminal" shell exited.

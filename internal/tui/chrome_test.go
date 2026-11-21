@@ -11,6 +11,8 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/devinthemtn/katnotes/internal/cli"
+	"github.com/devinthemtn/katnotes/internal/commands"
+	"github.com/devinthemtn/katnotes/internal/config"
 	"github.com/devinthemtn/katnotes/internal/notes"
 )
 
@@ -182,4 +184,23 @@ func TestDumpScreens(t *testing.T) {
 	m.layout()
 	press(m, "?")
 	write("help-wide")
+}
+
+func TestConfigEditedStatus(t *testing.T) {
+	t.Setenv(config.EnvConfigDir, t.TempDir())
+	t.Setenv("EDITOR", "true")
+	m := chromeModel(t, 100, 30)
+	for _, c := range []struct {
+		dir  bool
+		want string
+	}{{false, "closed config.toml"}, {true, "closed the config folder"}} {
+		next, _ := m.Update(configEditedMsg{dir: c.dir})
+		*m = next.(model)
+		if !strings.HasPrefix(m.status, c.want) {
+			t.Errorf("dir=%v: status %q", c.dir, m.status)
+		}
+	}
+	if cmd := tuiActions["config dir"](m, commands.Result{}); cmd == nil {
+		t.Error(":config dir should hand the terminal to the editor")
+	}
 }
