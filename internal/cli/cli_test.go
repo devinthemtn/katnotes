@@ -188,3 +188,17 @@ func TestWikiLinks(t *testing.T) {
 		t.Errorf("groceries.md:\n%s", g)
 	}
 }
+
+// The address todo prints is the one tasks list prints and tasks set takes.
+func TestTodoAddressWorksWithTasksSet(t *testing.T) {
+	setup(t)
+	out := mustRun(t, "todo", "call Sam")
+	addr := strings.TrimSpace(out[strings.LastIndex(out, " ")+1:])
+	if list := mustRun(t, "tasks", "list"); !strings.Contains(list, addr) {
+		t.Fatalf("todo said %q; tasks list:\n%s", addr, list)
+	}
+	mustRun(t, "tasks", "set", addr, "pri", "high")
+	if list := mustRun(t, "tasks", "list"); !strings.Contains(list, "high") {
+		t.Fatalf("pri not set:\n%s", list)
+	}
+}

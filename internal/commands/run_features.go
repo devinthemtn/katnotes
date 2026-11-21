@@ -106,7 +106,9 @@ func addTask(env *Env, n *notes.Note, text string) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	return Result{Note: got, Changed: true, Status: fmt.Sprintf("added task to %s:%d", got.Key(), env.Store.FileLine(got.Kind, got.ID, line))}, nil
+	// The same kind/id:line address "katnotes tasks list" prints and
+	// "tasks set" takes: a 1-based line of the body.
+	return Result{Note: got, Changed: true, Status: fmt.Sprintf("added task to %s:%d", got.Key(), line+1)}, nil
 }
 
 func runTodo(env *Env, args []string) (Result, error) {
