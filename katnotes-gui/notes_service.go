@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 
@@ -425,11 +424,7 @@ func (s *NotesService) ReloadConfig() (config.Config, error) {
 // slashDir is the folder of the "/" editor commands. (":" commands are
 // found by internal/commands.)
 func slashDir() (string, error) {
-	d, err := config.Dir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(d, luacmd.SlashDirName), nil
+	return config.File(luacmd.SlashDirName)
 }
 
 // SlashList is the user's Lua commands plus any files that failed to load.

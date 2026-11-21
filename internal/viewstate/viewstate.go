@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -32,11 +31,7 @@ type State struct {
 
 // Path returns the state file's location.
 func Path() (string, error) {
-	d, err := config.Dir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(d, FileName), nil
+	return config.File(FileName)
 }
 
 // Load reads the state; a missing or unreadable file is empty.

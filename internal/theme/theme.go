@@ -34,11 +34,8 @@ const DirName = "themes"
 
 // Dir returns the themes folder in the config directory ("" if unknown).
 func Dir() string {
-	d, err := config.Dir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(d, DirName)
+	p, _ := config.File(DirName) // "" when there is no config directory
+	return p
 }
 
 // Auto follows the system / terminal: the light or dark theme.

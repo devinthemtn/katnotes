@@ -2,7 +2,6 @@ package commands
 
 import (
 	"fmt"
-	"path/filepath"
 	"strings"
 
 	"github.com/devinthemtn/katnotes/internal/config"
@@ -14,11 +13,8 @@ import (
 // ":name [args…]" command. ("/" editor commands have their own folder.)
 // Tests replace it.
 var LuaDir = func() string {
-	d, err := config.Dir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(d, luacmd.CommandDirName)
+	p, _ := config.File(luacmd.CommandDirName) // "" when there is no config directory
+	return p
 }
 
 // luaSpecs lists the Lua commands as catalog entries. A script whose name is

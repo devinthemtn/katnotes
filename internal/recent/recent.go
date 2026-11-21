@@ -5,7 +5,6 @@ package recent
 
 import (
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/devinthemtn/katnotes/internal/config"
@@ -19,11 +18,7 @@ const Limit = 50
 
 // Path returns the recent-notes file's location.
 func Path() (string, error) {
-	d, err := config.Dir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(d, FileName), nil
+	return config.File(FileName)
 }
 
 // Load returns the remembered note keys, newest first. A missing file is

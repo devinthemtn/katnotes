@@ -117,14 +117,17 @@ func Dir() (string, error) {
 	return filepath.Join(base, AppName), nil
 }
 
-// Path returns the full path of config.toml.
-func Path() (string, error) {
+// File returns the path of name (a file or folder) in the config directory.
+func File(name string) (string, error) {
 	d, err := Dir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(d, "config.toml"), nil
+	return filepath.Join(d, name), nil
 }
+
+// Path returns the full path of config.toml.
+func Path() (string, error) { return File("config.toml") }
 
 // EditTarget returns what ":config" opens in an editor: config.toml, or the
 // config directory when dir is set. The directory is created if missing so
@@ -140,7 +143,7 @@ func EditTarget(dir bool) (string, error) {
 	if dir {
 		return d, nil
 	}
-	return filepath.Join(d, "config.toml"), nil
+	return Path()
 }
 
 // Load reads the config file, filling missing values with defaults. A missing

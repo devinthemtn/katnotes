@@ -7,7 +7,6 @@
 package commands
 
 import (
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -167,11 +166,8 @@ func (e *Env) TemplatesPath() string {
 // TemplatesDir is the page templates folder in the config directory, or ""
 // when there is no config directory.
 func TemplatesDir() string {
-	d, err := config.Dir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(d, notes.TemplatesDirName)
+	p, _ := config.File(notes.TemplatesDirName) // "" when there is no config directory
+	return p
 }
 
 func (e *Env) now() time.Time {

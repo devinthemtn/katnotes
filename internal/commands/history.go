@@ -2,7 +2,6 @@ package commands
 
 import (
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/devinthemtn/katnotes/internal/config"
@@ -17,11 +16,7 @@ const HistoryLimit = 200
 
 // HistoryPath returns the history file's location.
 func HistoryPath() (string, error) {
-	d, err := config.Dir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(d, HistoryFile), nil
+	return config.File(HistoryFile)
 }
 
 // LoadHistory reads the history, newest first. A missing file is empty.
