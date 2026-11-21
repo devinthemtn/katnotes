@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -33,7 +34,14 @@ func longModel(t *testing.T) *model {
 	t.Helper()
 	m := chromeModel(t, 120, 30)
 	body := "# Long\n\n" + strings.Repeat("a line of the long note\n\n", 60)
-	if _, err := m.app.Store.Create(notes.KindPage, "Long", nil, body); err != nil {
+	n, err := m.app.Store.Create(notes.KindPage, "Long", nil, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Older than Groceries, so the list order doesn't depend on whether
+	// both notes were written in the same second.
+	old := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(n.Path, old, old); err != nil {
 		t.Fatal(err)
 	}
 	m.reload()
@@ -88,7 +96,8 @@ func TestClickTabsAndRows(t *testing.T) {
 		t.Fatalf("clicked Pages, on tab %d", m.tab)
 	}
 
-	y := screenRow(t, m, "│ Groceries") // the title line of its row
+	m.selectKey("page/long")          // tab clicks select the first row, Groceries
+	y := screenRow(t, m, "Groceries") // the title line of its row
 	if cmd := mouse(m, tea.MouseButtonLeft, 5, y); cmd != nil {
 		t.Error("a single click should only select")
 	}
