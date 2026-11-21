@@ -370,6 +370,15 @@ tags: [meeting]
 
 If the notes folder is in a git repository, `:sync` (or `katnotes sync`) commits everything in it as `katnotes sync <date time>`. When the branch has an upstream, it then pulls with `--rebase --autostash` and pushes. Only the notes folder is committed, even when it sits inside a bigger repository. Git never prompts for a password, so use an SSH key or a credential helper. Run `git push -u <remote> <branch>` once to set up the upstream.
 
+## Upgrading to 1.0
+
+Two `:` commands were renamed to sit with their siblings:
+
+- `:tags work, ideas` is now `:tag set work, ideas`. Typing `:tags` tells you so.
+- `:config-dir` (new since 0.14) is `:config dir`.
+
+Notes, config files and Lua commands need no changes.
+
 ## Building
 
 You need Go 1.26+ and [go-task](https://taskfile.dev). The GUI also needs `wails3` and Node. On Linux it needs GTK3 and webkit2gtk-4.1; the Taskfiles pass `-tags gtk3`.
@@ -383,6 +392,14 @@ task install      # both binaries into $GOPATH/bin; in WSL, the Windows versions
 task build-windows    # bin/katnotes.exe and katnotes-gui/bin/katnotes-gui.exe
 task install-windows  # from WSL: the Windows part of task install on its own
 task build-win-installer  # bin/KatNotes-<version>-windows-amd64-setup.exe, to hand out
+```
+
+### Releasing
+
+```
+task bump-version V=1.2.3     # the version in the GUI's build files; commit it
+git tag -a v1.2.3 -m "katnotes v1.2.3"
+task release                  # bin/release-v1.2.3/: Linux tarball, Windows installer, SHA256SUMS
 ```
 
 ### Windows installer
