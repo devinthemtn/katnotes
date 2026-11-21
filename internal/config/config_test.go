@@ -199,3 +199,83 @@ func TestEditTarget(t *testing.T) {
 		t.Fatalf("dir: %q, %v", p, err)
 	}
 }
+
+// Every key in Keys can be set, and bad values are refused without
+// touching the file.
+func TestSetEveryKey(t *testing.T) {
+	t.Setenv(EnvConfigDir, t.TempDir())
+	t.Setenv(EnvNotesDir, "")
+	good := map[string]struct {
+		value string
+		check func(c Config) bool
+	}{
+		"notes_dir":             {"/tmp/n", func(c Config) bool { return c.NotesDir == "/tmp/n" }},
+		"editor":                {"nvim -p", func(c Config) bool { return c.Editor == "nvim -p" }},
+		"previewer":             {" glow ", func(c Config) bool { return c.Previewer == "glow" }},
+		"previewer_mode":        {"Window", func(c Config) bool { return c.PreviewerMode == "window" }},
+		"default_kind":          {"j", func(c Config) bool { return c.DefaultKind == "journal" }},
+		"journal_template":      {`# {{.Title}}\n`, func(c Config) bool { return c.JournalTemplate == "# {{.Title}}\n" }},
+		"date_format":           {"dd/mm/yyyy", func(c Config) bool { return c.DateFormat == "dd/mm/yyyy" }},
+		"open_with":             {"code -n", func(c Config) bool { return c.OpenWith == "code -n" }},
+		"tui_open_with":         {"hx", func(c Config) bool { return c.TUIOpenWith == "hx" }},
+		"start_page":            {"page/home", func(c Config) bool { return c.StartPage == "page/home" }},
+		"frontmatter_collapsed": {"true", func(c Config) bool { return c.FrontmatterCollapsed }},
+		"task_done_date":        {"false", func(c Config) bool { return !c.TaskDoneDate }},
+		"tui_mouse":             {"false", func(c Config) bool { return !c.TUIMouse }},
+		"theme":                 {"ocean.toml", func(c Config) bool { return c.Theme == "ocean" }},
+		"tui_theme":             {"dark", func(c Config) bool { return c.ThemeFor("tui") == "dark" }},
+		"gui_theme":             {"light", func(c Config) bool { return c.ThemeFor("gui") == "light" }},
+		"font.body":             {"Inter", func(c Config) bool { return c.Font.Body == "Inter" }},
+		"font.mono":             {"Iosevka", func(c Config) bool { return c.Font.Mono == "Iosevka" }},
+		"font.size":             {"18px", func(c Config) bool { return c.Font.Size == 18 }},
+	}
+	bad := map[string]string{
+		"previewer_mode": "sideways", "default_kind": "note", "date_format": "21/11/2026",
+		"start_page": "elsewhere", "frontmatter_collapsed": "yes please",
+		"task_done_date": "2", "tui_mouse": "maybe", "theme": "../x",
+		"font.size": "1",
+	}
+	for _, k := range Keys {
+		g, ok := good[k]
+		if !ok {
+			t.Errorf("no test value for %s", k)
+			continue
+		}
+		if v, ok := bad[k]; ok {
+			if err := Set(k, v); err == nil {
+				t.Errorf("Set(%s, %q) accepted", k, v)
+			}
+		}
+		if err := Set(k, g.value); err != nil {
+			t.Errorf("Set(%s, %q): %v", k, g.value, err)
+			continue
+		}
+		c, err := Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !g.check(c) {
+			t.Errorf("after Set(%s, %q): %+v", k, g.value, c)
+		}
+	}
+	if err := Set("colour", "red"); err == nil {
+		t.Error("unknown key accepted")
+	}
+	if ThemeKey("tui") != "tui_theme" || ThemeKey("cli") != "theme" {
+		t.Error("ThemeKey")
+	}
+}
+
+func TestWriteFileReplaces(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "sub", "state")
+	for _, s := range []string{"one", "two"} {
+		if err := WriteFile(p, []byte(s)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, _ := os.ReadFile(p)
+	entries, _ := os.ReadDir(filepath.Dir(p))
+	if string(got) != "two" || len(entries) != 1 {
+		t.Fatalf("got %q, %d file(s)", got, len(entries))
+	}
+}
