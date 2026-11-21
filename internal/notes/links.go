@@ -180,8 +180,10 @@ type BodyLink struct {
 	Kind Kind
 	ID   string
 	Note bool
-	// Byte offsets of the link text in the line.
+	// Byte offsets of the link text in the line, and of the destination
+	// (with any <>) for an inline link; DestEnd is 0 for a bare URL.
 	TextStart, TextEnd int
+	DestStart, DestEnd int
 }
 
 // bareURL matches a URL written as plain text.
@@ -204,7 +206,8 @@ func BodyLinks(n *Note) []BodyLink {
 			if dest == "" || strings.HasPrefix(dest, "#") {
 				continue
 			}
-			l := BodyLink{Line: i, Text: unescapeLinkText(line[m[4]:m[5]]), Dest: dest, TextStart: m[4], TextEnd: m[5]}
+			l := BodyLink{Line: i, Text: unescapeLinkText(line[m[4]:m[5]]), Dest: dest,
+				TextStart: m[4], TextEnd: m[5], DestStart: m[6], DestEnd: m[7]}
 			l.Kind, l.ID, l.Note = resolveLink(n.Kind, dest)
 			row = append(row, l)
 		}
@@ -225,6 +228,17 @@ func BodyLinks(n *Note) []BodyLink {
 		out = append(out, row...)
 	})
 	return out
+}
+
+// PlainLinks replaces each inline link in s with its text, for showing a
+// line without Markdown link syntax. Images are left as they are.
+func PlainLinks(s string) string {
+	return inlineLink.ReplaceAllStringFunc(s, func(m string) string {
+		if strings.HasPrefix(m, "!") {
+			return m
+		}
+		return unescapeLinkText(inlineLink.FindStringSubmatch(m)[2])
+	})
 }
 
 var linkEscape = regexp.MustCompile(`\\([\\\[\]])`)

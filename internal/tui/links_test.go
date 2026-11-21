@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/devinthemtn/katnotes/internal/cli"
 	"github.com/devinthemtn/katnotes/internal/notes"
@@ -240,5 +241,45 @@ func TestLinkKeysNeedFocusAndLinks(t *testing.T) {
 	press(m, "n") // the list has focus: n is "new note" again
 	if m.mode != modeInput {
 		t.Error("n in the list should still start a new note")
+	}
+}
+
+// Links to notes show only their text in the preview and the "Linked from"
+// footer; web links keep their URL.
+func TestPreviewHidesNotePaths(t *testing.T) {
+	m := chromeModel(t, 120, 30)
+	body := "# Plan\n\nbuy [Groceries](../pages/groceries.md) and [Ideas](../pages/ideas.md), [Site](https://example.org)\n"
+	if _, err := m.app.Store.Create(notes.KindPage, "Plan", nil, body); err != nil {
+		t.Fatal(err)
+	}
+	m.reload()
+	m.selectKey("page/plan")
+	view := ansi.Strip(m.view.View())
+	if strings.Contains(view, "pages/") || !strings.Contains(view, "Groceries") || !strings.Contains(view, "example.org") {
+		t.Errorf("preview:\n%s", view)
+	}
+
+	m.setFocusPreview(true)
+	press(m, "n")
+	view = ansi.Strip(m.view.View())
+	if strings.Contains(view, "pages/") || !strings.Contains(view, "▶Groceries◀") {
+		t.Errorf("highlighted preview:\n%s", view)
+	}
+
+	m.setFocusPreview(false)
+	m.selectKey("page/groceries")
+	if view := ansi.Strip(m.view.View()); strings.Contains(view, "](") || !strings.Contains(view, "buy Groceries and Ideas") {
+		t.Errorf("linked-from footer:\n%s", view)
+	}
+}
+
+func TestPreviewBodyEdits(t *testing.T) {
+	body := "[A](../pages/a.md) [B](../pages/b.md)\nhttps://x.org"
+	ls := notes.BodyLinks(&notes.Note{Kind: notes.KindPage, Body: body})
+	if got, want := previewBody(body, ls, 1), "[A](#) ["+linkOpen+"B"+linkClose+"](#)\nhttps://x.org"; got != want {
+		t.Errorf("previewBody = %q, want %q", got, want)
+	}
+	if got := previewBody(body, ls, 2); !strings.Contains(got, linkOpen+"https://x.org"+linkClose) {
+		t.Errorf("bare URL highlight: %q", got)
 	}
 }

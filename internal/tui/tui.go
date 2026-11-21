@@ -614,7 +614,7 @@ func (m *model) linkedFrom(n *notes.Note) string {
 	var b strings.Builder
 	b.WriteString("\n" + filterStyle.Render(fmt.Sprintf("  Linked from (%d)", len(bl))) + statusStyle.Render("  · gb lists them") + "\n")
 	for _, x := range bl {
-		line := x.Lines[0].Text
+		line := notes.PlainLinks(x.Lines[0].Text)
 		if r := []rune(line); len(r) > 60 {
 			line = string(r[:59]) + "…"
 		}
@@ -759,7 +759,7 @@ func (m *model) updatePreview() {
 			} else {
 				out = full.Body
 				if m.render != nil {
-					if r, err := m.render.Render(full.Body); err == nil {
+					if r, err := m.render.Render(previewBody(full.Body, notes.BodyLinks(full), -1)); err == nil {
 						out = r
 					}
 				}

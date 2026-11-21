@@ -196,3 +196,25 @@ func TestBodyLinks(t *testing.T) {
 		}
 	}
 }
+
+func TestPlainLinks(t *testing.T) {
+	in := `see [Beta](../pages/beta.md), [a \[b\]](<x y.md> "t") and ![pic](p.png)`
+	if got, want := PlainLinks(in), `see Beta, a [b] and ![pic](p.png)`; got != want {
+		t.Errorf("PlainLinks = %q, want %q", got, want)
+	}
+}
+
+func TestBodyLinkDestOffsets(t *testing.T) {
+	n := &Note{Kind: KindPage, Body: "go [Beta](<../pages/beta.md>) or https://x.org\n"}
+	ls := BodyLinks(n)
+	if len(ls) != 2 {
+		t.Fatalf("links: %+v", ls)
+	}
+	line := strings.Split(n.Body, "\n")[0]
+	if got := line[ls[0].DestStart:ls[0].DestEnd]; got != "<../pages/beta.md>" {
+		t.Errorf("dest span = %q", got)
+	}
+	if ls[1].DestEnd != 0 {
+		t.Errorf("a bare URL has no dest span: %+v", ls[1])
+	}
+}

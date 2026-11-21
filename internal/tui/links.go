@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -44,17 +45,41 @@ func (m *model) syncLinks(n *notes.Note) {
 	}
 }
 
-// markLink wraps link l's text in the body with the sentinel runes.
-func markLink(body string, l notes.BodyLink) string {
+// previewBody is body as the preview renders it. Links to notes point at
+// "#", which glamour shows as their text alone instead of text plus a
+// ../pages/x.md path (web links keep their URL). The link at index sel, if
+// any, has its text wrapped in the sentinel runes. links are body's links.
+func previewBody(body string, links []notes.BodyLink, sel int) string {
+	type edit struct {
+		start, end int
+		with       string
+	}
+	byLine := map[int][]edit{}
+	for i, l := range links {
+		if l.Note && l.DestEnd > l.DestStart {
+			byLine[l.Line] = append(byLine[l.Line], edit{l.DestStart, l.DestEnd, "#"})
+		}
+		if i == sel {
+			byLine[l.Line] = append(byLine[l.Line],
+				edit{l.TextEnd, l.TextEnd, linkClose}, edit{l.TextStart, l.TextStart, linkOpen})
+		}
+	}
 	lines := strings.Split(body, "\n")
-	if l.Line >= len(lines) {
-		return body
+	for n, edits := range byLine {
+		if n >= len(lines) {
+			continue
+		}
+		// Right to left, so earlier offsets stay valid.
+		slices.SortStableFunc(edits, func(a, b edit) int { return b.start - a.start })
+		s := lines[n]
+		for _, e := range edits {
+			if e.start < 0 || e.end > len(s) || e.start > e.end {
+				continue
+			}
+			s = s[:e.start] + e.with + s[e.end:]
+		}
+		lines[n] = s
 	}
-	s := lines[l.Line]
-	if l.TextEnd > len(s) || l.TextStart > l.TextEnd {
-		return body
-	}
-	lines[l.Line] = s[:l.TextStart] + linkOpen + s[l.TextStart:l.TextEnd] + linkClose + s[l.TextEnd:]
 	return strings.Join(lines, "\n")
 }
 
@@ -78,7 +103,7 @@ func (m *model) renderWithLink(n *notes.Note) (string, int) {
 	if err != nil {
 		return errStyle.Render(err.Error()), -1
 	}
-	body := markLink(full.Body, m.bodyLinks[m.linkIdx])
+	body := previewBody(full.Body, m.bodyLinks, m.linkIdx)
 	out := body
 	if m.render != nil {
 		if r, err := m.render.Render(body); err == nil {
