@@ -53,8 +53,9 @@
   </select>
 {/snippet}
 
-<Modal {onclose} cls="wide" label="Settings">
-  <h2>Settings</h2>
+<Modal {onclose} cls="wide settings" label="Settings">
+  <header class="settings-head"><h2>Settings</h2></header>
+  <div class="settings-body">
   <label>Notes folder
     <div class="row">
       <input value={cfg.notes_dir} readonly />
@@ -154,7 +155,8 @@
     <textarea rows="4" value={cfg.journal_template} onchange={(e) => onsave('journal_template', val(e))}></textarea>
   </label>
   <p class="hint">Config: {configPath} · katnotes-gui {version}</p>
-  <div class="modal-actions">
-    <button class="primary" onclick={onclose}>Done</button>
   </div>
+  <footer class="settings-foot">
+    <button class="primary" onclick={onclose}>Done</button>
+  </footer>
 </Modal>
