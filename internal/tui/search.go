@@ -98,15 +98,19 @@ func (m model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // searchBarView is the bottom line while searching: mode chips and input.
+// searchChip is the search bar's chip for mode md, lit when it's current.
+func (m *model) searchChip(md notes.SearchMode) string {
+	label := strings.ToUpper(string(md[:1])) + string(md[1:])
+	if md == m.searchMode {
+		return chipOn.Render(label)
+	}
+	return chipOff.Render(label)
+}
+
 func (m model) searchBarView() string {
 	var chips []string
 	for _, md := range notes.SearchModes {
-		label := strings.ToUpper(string(md[:1])) + string(md[1:])
-		if md == m.searchMode {
-			chips = append(chips, chipOn.Render(label))
-		} else {
-			chips = append(chips, chipOff.Render(label))
-		}
+		chips = append(chips, m.searchChip(md))
 	}
 	return strings.Join(chips, "") + " " + m.searchInput.View() + "  " + cmdGhost.Render(searchHints[m.searchMode]+" · tab mode · enter keep · esc clear")
 }
@@ -154,7 +158,18 @@ func (m *model) cycleSort(k notes.Kind) {
 // skips it.
 type headerItem struct{ label string }
 
-func (i headerItem) Title() string       { return groupHd.Render("── " + i.label + " ──") }
+// headerWidth is the note list's width, which month headers rule across
+// (layout sets it; 0 draws a short rule).
+var headerWidth int
+
+func (i headerItem) Title() string {
+	// The list draws titles after a 2-column left padding.
+	fill := headerWidth - 2 - 5 - lipgloss.Width(i.label)
+	if fill < 2 {
+		fill = 2
+	}
+	return groupHd.Render("── " + i.label + " " + strings.Repeat("─", fill))
+}
 func (i headerItem) Description() string { return "" }
 func (i headerItem) FilterValue() string { return "" }
 

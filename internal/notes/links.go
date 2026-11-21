@@ -119,10 +119,9 @@ func resolveLink(from Kind, dest string) (Kind, string, bool) {
 	return "", "", false
 }
 
-// ParseLinks returns the links in a note's body to other notes, skipping
-// fenced code, inline code and images.
-func ParseLinks(n *Note) []Link {
-	var out []Link
+// bodyLines calls fn for each body line outside fenced code, with the line
+// and a copy whose inline code spans are blanked out (same byte offsets).
+func bodyLines(n *Note, fn func(i int, line, masked string)) {
 	fence := ""
 	for i, line := range strings.Split(n.Body, "\n") {
 		t := strings.TrimSpace(line)
@@ -135,10 +134,21 @@ func ParseLinks(n *Note) []Link {
 			}
 			continue
 		}
-		if fence != "" || !strings.Contains(line, "](") {
+		if fence != "" {
 			continue
 		}
-		masked := maskCode(line)
+		fn(i, line, maskCode(line))
+	}
+}
+
+// ParseLinks returns the links in a note's body to other notes, skipping
+// fenced code, inline code and images.
+func ParseLinks(n *Note) []Link {
+	var out []Link
+	bodyLines(n, func(i int, line, masked string) {
+		if !strings.Contains(line, "](") {
+			return
+		}
 		for _, m := range inlineLink.FindAllStringSubmatchIndex(masked, -1) {
 			if m[3] > m[2] { // image
 				continue
@@ -157,7 +167,63 @@ func ParseLinks(n *Note) []Link {
 				textStart: m[4], textEnd: m[5], destStart: ds, destEnd: de,
 			})
 		}
-	}
+	})
+	return out
+}
+
+// BodyLink is any link in a note's body: to another note (Note set, with
+// its Kind and ID; the note may not exist yet), a URL, or another file.
+type BodyLink struct {
+	Line int    // 0-based body line
+	Text string // link text, unescaped (a bare URL is its own text)
+	Dest string // destination as written, without <>
+	Kind Kind
+	ID   string
+	Note bool
+	// Byte offsets of the link text in the line.
+	TextStart, TextEnd int
+}
+
+// bareURL matches a URL written as plain text.
+var bareURL = regexp.MustCompile(`https?://[^\s<>()\[\]]+`)
+
+// BodyLinks returns every link in a note's body in reading order: inline
+// [text](dest) links of any kind and bare http(s) URLs. It skips images,
+// code and same-page #anchor links.
+func BodyLinks(n *Note) []BodyLink {
+	var out []BodyLink
+	bodyLines(n, func(i int, line, masked string) {
+		var spans [][2]int // inline links, so bare URLs inside them are skipped
+		var row []BodyLink
+		for _, m := range inlineLink.FindAllStringSubmatchIndex(masked, -1) {
+			spans = append(spans, [2]int{m[0], m[1]})
+			if m[3] > m[2] { // image
+				continue
+			}
+			dest := strings.TrimSuffix(strings.TrimPrefix(line[m[6]:m[7]], "<"), ">")
+			if dest == "" || strings.HasPrefix(dest, "#") {
+				continue
+			}
+			l := BodyLink{Line: i, Text: unescapeLinkText(line[m[4]:m[5]]), Dest: dest, TextStart: m[4], TextEnd: m[5]}
+			l.Kind, l.ID, l.Note = resolveLink(n.Kind, dest)
+			row = append(row, l)
+		}
+		for _, m := range bareURL.FindAllStringIndex(masked, -1) {
+			inside := false
+			for _, sp := range spans {
+				if m[0] >= sp[0] && m[0] < sp[1] {
+					inside = true
+				}
+			}
+			if inside {
+				continue
+			}
+			u := strings.TrimRight(line[m[0]:m[1]], ".,;:!?'\"")
+			row = append(row, BodyLink{Line: i, Text: u, Dest: u, TextStart: m[0], TextEnd: m[0] + len(u)})
+		}
+		slices.SortFunc(row, func(a, b BodyLink) int { return a.TextStart - b.TextStart })
+		out = append(out, row...)
+	})
 	return out
 }
 

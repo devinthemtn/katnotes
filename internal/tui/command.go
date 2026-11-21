@@ -331,11 +331,25 @@ func (m model) commandInputView() string {
 }
 
 // commandDropdown renders the suggestion box.
+// cmdDropdownRows lays out the ":" dropdown: head is 1 when a usage row
+// comes first, and suggestions start…end-1 are the ones shown.
+func (m *model) cmdDropdownRows() (head, start, end int) {
+	c := m.cmdComp
+	if c.Phase == "arg" || c.Phase == "none" || c.Exact {
+		head = 1
+	}
+	if m.cmdSel >= maxCmdRows {
+		start = m.cmdSel - maxCmdRows + 1
+	}
+	return head, start, min(start+maxCmdRows, len(c.Items))
+}
+
 func (m model) commandDropdown() string {
 	c := m.cmdComp
 	w := min(max(m.width-4, 20), 72)
 	var rows []string
-	if c.Phase == "arg" || c.Phase == "none" || c.Exact {
+	head, start, end := m.cmdDropdownRows()
+	if head > 0 {
 		head := " " + c.Usage
 		if c.Desc != "" {
 			head += " — " + c.Desc
@@ -353,11 +367,6 @@ func (m model) commandDropdown() string {
 		}
 		return cmdBox.Render(strings.Join(rows, "\n"))
 	}
-	start := 0
-	if m.cmdSel >= maxCmdRows {
-		start = m.cmdSel - maxCmdRows + 1
-	}
-	end := min(start+maxCmdRows, len(c.Items))
 	nameW := 0
 	for _, s := range c.Items[start:end] {
 		nameW = max(nameW, len([]rune(s.Label)))

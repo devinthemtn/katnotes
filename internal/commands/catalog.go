@@ -256,6 +256,9 @@ func init() {
 		{Name: "unpin", Desc: "Unpin the note", NeedsNote: true, run: runUnpin},
 		{Name: "copy-link", Desc: "Copy a Markdown link to the note", NeedsNote: true, run: runCopyLink},
 		{Name: "link", Desc: "Link this note to another (adds it under ## Links)", NeedsNote: true, Args: []Arg{note}, run: runLink},
+		{Name: "wikilinks", Desc: "Turn [[page]] text into links to pages, creating missing ones (move: also move the lines indented under it there)", NeedsNote: true, Args: []Arg{
+			{Name: "move", Kind: ArgChoice, Optional: true, Choices: []string{"move"}},
+		}, run: runWikiLinks},
 		{Name: "links", Desc: "Notes this note links to", NeedsNote: true, run: runLinks},
 		{Name: "backlinks", Desc: "Notes that link to this note", NeedsNote: true, run: runBacklinks},
 		{Name: "frontmatter", Desc: "Edit the note's frontmatter as YAML (adds one if missing)", NeedsNote: true, UI: true},

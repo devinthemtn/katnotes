@@ -120,6 +120,35 @@ func linkCmd(a *App) *cobra.Command {
 	return noteCmd(a, "link <id>", "Print a Markdown link to a note (the apps' copy-link)", "copy-link", cobra.ExactArgs(1), nil)
 }
 
+func wikilinksCmd(a *App) *cobra.Command {
+	var move bool
+	cmd := &cobra.Command{
+		Use:   "wikilinks <id>",
+		Short: "Turn [[page]] text in a note into Markdown links, creating missing pages",
+		Long: "Rewrites each [[Page]] or [[Page|text]] as a link to the page titled Page\n" +
+			"(or whose id is its slug), creating the page if there is none. With --move,\n" +
+			"the lines indented under a [[Page]] line move to that page: they become a\n" +
+			"new page's body, or go at the end of an existing one under a heading that\n" +
+			"links back to this note.",
+		Args: cobra.ExactArgs(1),
+	}
+	kind := kindFlags(cmd)
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		n, err := a.resolve(args[0], kind())
+		if err != nil {
+			return err
+		}
+		var rest []string
+		if move {
+			rest = []string{"move"}
+		}
+		_, err = a.exec(n, "wikilinks", rest...)
+		return err
+	}
+	cmd.Flags().BoolVar(&move, "move", false, "also move the lines indented under each [[page]] to that page")
+	return cmd
+}
+
 func journalCmd(a *App) *cobra.Command {
 	var noEdit bool
 	cmd := &cobra.Command{

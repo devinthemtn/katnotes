@@ -149,6 +149,24 @@ func TestFrontmatterCollapsed(t *testing.T) {
 	}
 }
 
+func TestTUIMouse(t *testing.T) {
+	t.Setenv(EnvConfigDir, t.TempDir())
+	t.Setenv(EnvNotesDir, "")
+
+	if cfg, _ := Load(); !cfg.TUIMouse {
+		t.Error("the mouse should be on by default")
+	}
+	if err := Set("tui_mouse", "false"); err != nil {
+		t.Fatal(err)
+	}
+	if cfg, _ := Load(); cfg.TUIMouse {
+		t.Error("still on after Set false")
+	}
+	if err := Set("tui_mouse", "sometimes"); err == nil {
+		t.Error("want error for non-bool")
+	}
+}
+
 func TestOpenWithFor(t *testing.T) {
 	t.Setenv(EnvConfigDir, t.TempDir())
 	if err := Set("open_with", "emacsclient -c -a ''"); err != nil {

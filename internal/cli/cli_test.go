@@ -167,3 +167,24 @@ func TestLsSort(t *testing.T) {
 		t.Error("--sort bogus: no error")
 	}
 }
+
+func TestWikiLinks(t *testing.T) {
+	notesDir, _ := setup(t)
+	mustRun(t, "new", "--no-edit", "Groceries")
+	mustRun(t, "new", "--no-edit", "Scratch")
+	p := filepath.Join(notesDir, "pages", "scratch.md")
+	data, _ := os.ReadFile(p)
+	os.WriteFile(p, append(data, []byte("\n- [[Groceries]]\n  - milk\n- [[Brand New|new one]]\n")...), 0o644)
+	out := mustRun(t, "wikilinks", "--move", "scratch")
+	if !strings.Contains(out, "created page/brand-new") {
+		t.Errorf("output: %s", out)
+	}
+	data, _ = os.ReadFile(p)
+	if s := string(data); !strings.Contains(s, "- [Groceries](../pages/groceries.md)\n- [new one](../pages/brand-new.md)") || strings.Contains(s, "milk") {
+		t.Errorf("scratch.md:\n%s", s)
+	}
+	g, _ := os.ReadFile(filepath.Join(notesDir, "pages", "groceries.md"))
+	if !strings.Contains(string(g), "## From [Scratch](../pages/scratch.md)\n\n- milk") {
+		t.Errorf("groceries.md:\n%s", g)
+	}
+}

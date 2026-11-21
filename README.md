@@ -58,6 +58,7 @@ default_kind = "page"       # what `katnotes new` makes
 journal_template = "# {{.Date}}\n\n"   # fields: .Date .ID .Weekday .Time
 date_format = "yyyy-mm-dd"  # journal titles, and dates typed for new entries: dd/mm/yyyy, mm/dd/yyyy, dddd d mmmm yyyy… (or a Go layout)
 task_done_date = true       # checking a task adds {done:YYYY-MM-DD}
+tui_mouse = true            # TUI only (the GUI always has the mouse): click tabs/rows, double-click opens, wheel scrolls; hold shift to select text. false turns it off
 
 start_page = "none"         # none, last, today, page/<id> or journal/<id> (last: the latest note opened in either app)
 frontmatter_collapsed = false  # GUI table / TUI preview start folded (TUI: F toggles)
@@ -195,6 +196,7 @@ katnotes tasks list [--overdue] [--due-before fri] [--pri high] [--where key:val
 katnotes tasks set page/<id>:<line> due tomorrow   # set {due:…}; no value removes the key
 katnotes links <id>            # notes this note links to (marks missing ones)
 katnotes backlinks <id>        # notes that link here, with the lines
+katnotes wikilinks <id> [--move]   # turn [[page]] text into links, creating missing pages
 katnotes config path|show|edit|set
 ```
 
@@ -208,7 +210,10 @@ Every command accepts `--json` for scripting. The commands shared with the comma
 | `gg` / `G` | first / last item |
 | `ctrl+d` / `ctrl+u` | half a page down / up the list |
 | `ctrl+f` / `ctrl+b` | next / previous page of the list |
-| `tab` / `1`–`4` / `gt` / `gT` | switch between Pages, Journal, Tags and Tasks (`h` / `l` too) |
+| `tab` | move the focus to the note preview: `j`/`k`, `ctrl+d`/`ctrl+u`, space, `gg`/`G` then scroll it; `tab` or `esc` goes back to the list (clicking either pane focuses it too) |
+| `n` / `N`, `enter` (focused preview) | highlight the next / previous link in the note (it scrolls into view), then open it: a note is shown here (a missing one is created and opened in your editor), a URL or other file opens in the system's default app |
+| `b` (focused preview) / `backspace` | back to the note you followed a link from |
+| `l` / `h` / `1`–`4` / `gt` / `gT` / `shift+tab` | switch between Pages, Journal, Tags and Tasks |
 | `ctrl+e` / `ctrl+y` | scroll the preview a line (`pgdn` / `pgup`: half a page) |
 | `n` | new note |
 | `enter` / `e` | edit in `$EDITOR` |
@@ -325,6 +330,7 @@ return {
 | `copy-link` | copy a Markdown link to the note |
 | `link <note>` | link this note to another: adds `- [Title](../pages/id.md)` under its `## Links` heading, creating the heading at the end of the note the first time (nothing happens if the link is already there) |
 | `links` / `backlinks` | notes this note links to, or that link to it |
+| `wikilinks [move]` | turn each `[[Page]]` (or `[[Page\|text]]`) in the note into a link to the page with that title (or whose id is its slug), creating the page when there is none; text in code is left alone. With `move`, the lines indented under a line with one link — a `[[Page]]`, or a Markdown link to a note such as one an earlier `wikilinks` or the GUI's `[[` picker wrote — move to that note: they become a new page's body, or go at the end of an existing page under `## From [This note](…)` |
 | `delete` | delete the note (asks first) |
 | `todo <task>` / `todo here <task>` | add `- [ ] task` to today's journal (or this note) without opening an editor; `{due:fri pri:h}` works like in the editor |
 | `pin` / `unpin` | keep the note at the top of the list (`pinned: true` in its frontmatter; shown with 📌) |

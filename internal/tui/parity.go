@@ -82,10 +82,7 @@ var fmKey = lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Width(10)
 // GUI's table) when m.fmOpen, otherwise just the tags.
 func (m *model) frontmatterView(n *notes.Note) string {
 	if !m.fmOpen {
-		if len(n.Tags) == 0 {
-			return ""
-		}
-		return filterStyle.Render("  "+tagsText(n.Tags)) + "\n"
+		return m.noteHeader(n)
 	}
 	row := func(k, v string) string {
 		if v == "" {
@@ -156,4 +153,27 @@ func (m *model) noteByKey(k string) *notes.Note {
 		return nil
 	}
 	return n
+}
+
+// noteHeader is the short block above a preview with the frontmatter
+// collapsed: where the note lives and its dates, its tags as chips, and a
+// rule.
+func (m *model) noteHeader(n *notes.Note) string {
+	const day = "Jan 02 2006"
+	meta := fmt.Sprintf("%s · created %s · modified %s", n.Key(), n.Created.Format(day), n.Updated.Format(day))
+	var b strings.Builder
+	b.WriteString(statusStyle.Render("  " + meta))
+	b.WriteString("\n")
+	if len(n.Tags) > 0 {
+		chips := make([]string, len(n.Tags))
+		for i, t := range n.Tags {
+			chips[i] = chipOn.Render("#" + t)
+		}
+		b.WriteString("  " + strings.Join(chips, " "))
+		b.WriteString("\n")
+	}
+	w := max(m.view.Width-4, 4)
+	b.WriteString("  " + lipgloss.NewStyle().Foreground(borderColor).Render(strings.Repeat("─", w)))
+	b.WriteString("\n")
+	return b.String()
 }

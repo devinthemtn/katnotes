@@ -138,3 +138,107 @@ func TestTagAndLinkKeys(t *testing.T) {
 		t.Errorf("groceries preview lacks the backlink:\n%s", m.view.View())
 	}
 }
+
+// keyMsg sends a special key (tab, enter, backspace) to m.
+func keyMsg(m *model, t tea.KeyType) tea.Cmd {
+	next, cmd := m.Update(tea.KeyMsg{Type: t})
+	*m = next.(model)
+	return cmd
+}
+
+func TestFollowLinksFromPreview(t *testing.T) {
+	m := chromeModel(t, 120, 30) // has page/groceries
+	filler := strings.Repeat("filler line\n\n", 40)
+	body := "Go to [Groceries](../pages/groceries.md) or https://go.dev.\n\n" + filler + "Later: [New idea](../pages/new-idea.md)\n"
+	if _, err := m.app.Store.Create(notes.KindPage, "Plan", nil, body); err != nil {
+		t.Fatal(err)
+	}
+	var opened []string
+	defer func(f func(string) error) { openExternal = f }(openExternal)
+	openExternal = func(s string) error { opened = append(opened, s); return nil }
+
+	m.reload()
+	m.selectKey("page/plan")
+	keyMsg(m, tea.KeyTab)
+	if !m.focusPreview {
+		t.Fatal("tab should focus the preview")
+	}
+	if len(m.bodyLinks) != 3 {
+		t.Fatalf("links = %+v", m.bodyLinks)
+	}
+
+	press(m, "n")
+	if !strings.Contains(m.status, "link 1/3: Groceries → page/groceries") || !strings.Contains(m.view.View(), "▶") {
+		t.Fatalf("n should highlight the first link: status %q\n%s", m.status, m.view.View())
+	}
+	if strings.Contains(m.view.View(), linkOpen) {
+		t.Error("sentinels left in the preview")
+	}
+
+	// N wraps to the last link, far down the note: the preview scrolls to it.
+	press(m, "N")
+	press(m, "N")
+	if m.linkIdx != 1 {
+		t.Fatalf("N N from 1 = link %d, want 2 (index 1)", m.linkIdx+1)
+	}
+	press(m, "N")
+	press(m, "N")
+	if m.linkIdx != 2 || m.view.YOffset == 0 || !strings.Contains(m.view.View(), "▶") {
+		t.Fatalf("last link should be in view: idx %d offset %d", m.linkIdx, m.view.YOffset)
+	}
+
+	// The URL opens in the system's app.
+	press(m, "n") // wraps to 1
+	press(m, "n") // the URL
+	keyMsg(m, tea.KeyEnter)
+	if len(opened) != 1 || opened[0] != "https://go.dev" {
+		t.Fatalf("opened %v", opened)
+	}
+
+	// A note link shows the note, keeping the preview focused; ⌫ comes back.
+	press(m, "N") // Groceries
+	if cmd := keyMsg(m, tea.KeyEnter); cmd != nil {
+		t.Error("an existing note shouldn't open the editor")
+	}
+	if n := m.selected(); n == nil || n.ID != "groceries" || !m.focusPreview || m.linkIdx != -1 {
+		t.Fatalf("after enter: selected %v, focus %v, link %d", m.selected(), m.focusPreview, m.linkIdx)
+	}
+	press(m, "b")
+	if n := m.selected(); n == nil || n.ID != "plan" || !m.focusPreview {
+		t.Fatalf("b should return to plan with the preview focused, at %v", m.selected())
+	}
+	press(m, "n") // Groceries again; backspace works too
+	keyMsg(m, tea.KeyEnter)
+	keyMsg(m, tea.KeyBackspace)
+	if n := m.selected(); n == nil || n.ID != "plan" {
+		t.Fatalf("backspace should return to plan, at %v", m.selected())
+	}
+	keyMsg(m, tea.KeyBackspace)
+	if m.status != "no previous note" {
+		t.Errorf("status %q", m.status)
+	}
+
+	// A missing note is created and opened in the editor.
+	press(m, "N")
+	if cmd := keyMsg(m, tea.KeyEnter); cmd == nil {
+		t.Errorf("a missing note should open the editor (status %q)", m.status)
+	}
+	if _, err := m.app.Store.Get(notes.KindPage, "new-idea"); err != nil {
+		t.Errorf("new-idea not created: %v", err)
+	}
+}
+
+func TestLinkKeysNeedFocusAndLinks(t *testing.T) {
+	m := chromeModel(t, 120, 30)
+	m.selectKey("page/groceries")
+	keyMsg(m, tea.KeyTab)
+	press(m, "n")
+	if m.status != "no links in this note" || m.mode != modeNormal {
+		t.Errorf("n without links: status %q, mode %d", m.status, m.mode)
+	}
+	keyMsg(m, tea.KeyTab)
+	press(m, "n") // the list has focus: n is "new note" again
+	if m.mode != modeInput {
+		t.Error("n in the list should still start a new note")
+	}
+}

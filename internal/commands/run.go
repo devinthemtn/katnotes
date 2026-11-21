@@ -307,6 +307,44 @@ func runLink(env *Env, args []string) (Result, error) {
 	return Result{Note: n, Changed: true, Status: "linked " + n.Key() + " → " + to.Key()}, nil
 }
 
+// runWikiLinks turns the note's [[page]] text into links ("move" also moves
+// the lines indented under each one to its page).
+func runWikiLinks(env *Env, args []string) (Result, error) {
+	move := false
+	for _, a := range args {
+		switch strings.ToLower(strings.TrimSpace(a)) {
+		case "move":
+			move = true
+		case "":
+		default:
+			return Result{}, fmt.Errorf("wikilinks: unknown option %q (want move)", a)
+		}
+	}
+	n, res, err := env.Store.ResolveWikiLinks(env.Note.Kind, env.Note.ID, move)
+	if err != nil {
+		return Result{}, err
+	}
+	if res.Links == 0 && res.Blocks == 0 {
+		msg := "no [[links]] in " + n.Key()
+		if move {
+			msg = "no [[links]] or indented lines under a link in " + n.Key()
+		}
+		return Result{Note: n, Status: msg}, nil
+	}
+	var parts []string
+	if res.Links > 0 {
+		parts = append(parts, fmt.Sprintf("%d link(s)", res.Links))
+	}
+	if len(res.Created) > 0 {
+		parts = append(parts, "created "+strings.Join(res.Created, ", "))
+	}
+	if res.Blocks > 0 {
+		parts = append(parts, fmt.Sprintf("moved %d block(s) to %s", res.Blocks, strings.Join(res.Moved, ", ")))
+	}
+	status := "wikilinks " + n.Key() + ": " + strings.Join(parts, " · ")
+	return Result{Note: n, Changed: true, Status: status}, nil
+}
+
 func runCopyLink(env *Env, _ []string) (Result, error) {
 	n := env.Note
 	link := notes.LinkMarkdown(n.Kind, n.ID, n.Title)

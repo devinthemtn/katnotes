@@ -106,11 +106,13 @@ func TestListRowsPinSearchAndFrontmatter(t *testing.T) {
 	m.reload()
 
 	m.selectKey("page/alpha")
-	if strings.Contains(m.view.View(), "created") {
-		t.Fatal("frontmatter should start collapsed")
+	// Collapsed, the preview has the short header (key and dates), not
+	// the field table ("updated", "pinned"…).
+	if v := m.view.View(); strings.Contains(v, "updated") || !strings.Contains(v, "page/alpha · created") {
+		t.Fatalf("frontmatter should start collapsed:\n%s", v)
 	}
 	typ("F")
-	if v := m.view.View(); !strings.Contains(v, "created") || !strings.Contains(v, "pinned") {
+	if v := m.view.View(); !strings.Contains(v, "updated") || !strings.Contains(v, "pinned") {
 		t.Fatalf("frontmatter not shown:\n%s", v)
 	}
 }

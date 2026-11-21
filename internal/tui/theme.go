@@ -2,6 +2,8 @@ package tui
 
 import (
 	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/glamour/ansi"
+	"github.com/charmbracelet/glamour/styles"
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/devinthemtn/katnotes/internal/config"
@@ -39,7 +41,6 @@ func applyTheme(t theme.Theme) {
 	priHigh = lipgloss.NewStyle().Bold(true).Foreground(c("danger"))
 	priMed = lipgloss.NewStyle().Foreground(c("warning"))
 	priLow = lipgloss.NewStyle().Foreground(c("info"))
-	paneBorder = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(c("border"))
 
 	helpBox = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(c("accent")).Padding(0, 1)
 	helpBanner = onAccent.Bold(true).Padding(0, 1)
@@ -54,6 +55,41 @@ func applyTheme(t theme.Theme) {
 	chipOff = lipgloss.NewStyle().Foreground(c("muted")).Padding(0, 1)
 	groupHd = lipgloss.NewStyle().Bold(true).Foreground(c("heading"))
 	fmKey = lipgloss.NewStyle().Foreground(c("muted")).Width(10)
+
+	accentColor, borderColor, dangerColor = c("accent"), c("border"), c("danger")
+	tagStyle = lipgloss.NewStyle().Foreground(c("accent"))
+	doneStyle = lipgloss.NewStyle().Foreground(c("muted")).Strikethrough(true)
+	badgeOverdue = lipgloss.NewStyle().Foreground(c("danger")).Reverse(true).Padding(0, 1)
+	badgeToday = lipgloss.NewStyle().Foreground(c("warning")).Reverse(true).Padding(0, 1)
+	keyStyle = lipgloss.NewStyle().Bold(true).Foreground(c("accent"))
+	barOn = lipgloss.NewStyle().Foreground(c("accent"))
+	barOff = lipgloss.NewStyle().Foreground(c("border"))
+	catStyle = lipgloss.NewStyle().Bold(true).Foreground(c("accent"))
+}
+
+// glamourConfig is the Markdown preview style: glamour's light or dark
+// style with headings, links, code and rules in the theme's colours.
+func glamourConfig() ansi.StyleConfig {
+	cfg := styles.DarkStyleConfig
+	if !curTheme.Dark {
+		cfg = styles.LightStyleConfig
+	}
+	col := func(k string) *string { v := curTheme.Color(k); return &v }
+	yes := true
+
+	cfg.Heading.Color = col("heading")
+	cfg.H1.Color = col("accent_text")
+	cfg.H1.BackgroundColor = col("accent")
+	cfg.H6.Color = col("muted")
+	cfg.Link.Color = col("accent")
+	cfg.LinkText.Color = col("accent")
+	cfg.LinkText.Bold = &yes
+	cfg.Code.BackgroundColor = col("code_bg")
+	cfg.BlockQuote.Color = col("muted")
+	bar := "│ "
+	cfg.BlockQuote.IndentToken = &bar
+	cfg.HorizontalRule.Color = col("border")
+	return cfg
 }
 
 // newDelegate is the note list's row renderer in the theme's colours.

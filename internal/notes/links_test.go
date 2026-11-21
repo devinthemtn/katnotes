@@ -158,3 +158,41 @@ func TestAddLinkLine(t *testing.T) {
 		}
 	}
 }
+
+func TestBodyLinks(t *testing.T) {
+	n := &Note{Kind: KindPage, Body: strings.Join([]string{
+		"See [Groceries](../pages/groceries.md) and [Ideas](ideas.md).",
+		"Docs at https://go.dev/doc. and [the spec](<https://go.dev/ref/spec> \"spec\").",
+		"![a cat](cat.png) [top](#top) `[code](x.md)` [mail](mailto:a@b.c) [pdf](../files/a.pdf)",
+		"```",
+		"[fenced](fenced.md) https://hidden.example",
+		"```",
+	}, "\n")}
+	got := BodyLinks(n)
+	type row struct {
+		text, dest string
+		note       bool
+		id         string
+	}
+	want := []row{
+		{"Groceries", "../pages/groceries.md", true, "groceries"},
+		{"Ideas", "ideas.md", true, "ideas"},
+		{"https://go.dev/doc", "https://go.dev/doc", false, ""},
+		{"the spec", "https://go.dev/ref/spec", false, ""},
+		{"mail", "mailto:a@b.c", false, ""},
+		{"pdf", "../files/a.pdf", false, ""},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d links: %+v", len(got), got)
+	}
+	lines := strings.Split(n.Body, "\n")
+	for i, w := range want {
+		g := got[i]
+		if g.Text != w.text || g.Dest != w.dest || g.Note != w.note || g.ID != w.id {
+			t.Errorf("link %d = %+v, want %+v", i, g, w)
+		}
+		if lines[g.Line][g.TextStart:g.TextEnd] != w.text {
+			t.Errorf("link %d offsets cover %q", i, lines[g.Line][g.TextStart:g.TextEnd])
+		}
+	}
+}

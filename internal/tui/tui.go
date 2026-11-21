@@ -16,6 +16,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/devinthemtn/katnotes/internal/cli"
 	"github.com/devinthemtn/katnotes/internal/commands"
@@ -47,7 +48,11 @@ func Run(app *cli.App) error {
 	if themeErr != nil {
 		m.setErr(themeErr)
 	}
-	_, err := tea.NewProgram(m, tea.WithAltScreen()).Run()
+	opts := []tea.ProgramOption{tea.WithAltScreen()}
+	if app.Cfg.TUIMouse {
+		opts = append(opts, tea.WithMouseCellMotion())
+	}
+	_, err := tea.NewProgram(m, opts...).Run()
 	return err
 }
 
@@ -110,11 +115,12 @@ func (i noteItem) Description() string {
 	if i.n.Kind == notes.KindPage {
 		const day = "Jan 02 2006"
 		lines = append(lines, i.n.Created.Format(day)+"  │  m: "+i.n.Updated.Format(day))
-		lines = append(lines, tagsText(i.n.Tags))
+		lines = append(lines, tagsLine(i.n.Tags))
 	} else {
 		line := i.n.ID
 		if len(i.n.Tags) > 0 {
-			line += " · " + tagsText(i.n.Tags)
+			// The tags come last so their colour doesn't end the row's own.
+			line += " · " + tagsLine(i.n.Tags)
 		}
 		lines = append(lines, line)
 	}
@@ -122,6 +128,14 @@ func (i noteItem) Description() string {
 		lines = append(lines, "…"+i.match)
 	}
 	return strings.Join(lines, "\n")
+}
+
+// tagsLine is tagsText in the tag colour.
+func tagsLine(tags []string) string {
+	if len(tags) == 0 {
+		return ""
+	}
+	return tagStyle.Render(tagsText(tags))
 }
 
 func tagsText(tags []string) string {
@@ -143,13 +157,14 @@ type taskNoteItem struct{ nt notes.NoteTasks }
 
 func (i taskNoteItem) Title() string { return i.nt.Note.Title }
 func (i taskNoteItem) Description() string {
-	parts := []string{fmt.Sprintf("%d open · %d done", i.nt.Open, i.nt.Done)}
+	parts := []string{fmt.Sprintf("%d/%d done", i.nt.Done, i.nt.Open+i.nt.Done)}
 	if t, ok := firstOpen(i.nt.Tasks); ok {
 		parts = append(parts, "☐ "+t.Text)
 	} else {
 		parts = append(parts, notes.Key(i.nt.Note.Kind, i.nt.Note.ID))
 	}
-	return strings.Join(parts, " · ")
+	// The bar sets its own colours, so the text after it is styled too.
+	return progressBar(i.nt.Done, i.nt.Open+i.nt.Done, 6) + " " + statusStyle.Render(strings.Join(parts, " · "))
 }
 func (i taskNoteItem) FilterValue() string { return i.nt.Note.Title }
 
@@ -168,18 +183,24 @@ func (i taskItem) Title() string {
 	if text == "" {
 		text = "(empty task)"
 	}
-	return strings.Repeat(" ", min(i.t.Indent, 8)) + box + priMark(i.t) + text
+	indent := strings.Repeat(" ", min(i.t.Indent, 8))
+	if i.t.Done {
+		return indent + doneStyle.Render(box+text)
+	}
+	return indent + box + priMark(i.t) + text
 }
 func (i taskItem) Description() string {
-	parts := []string{}
-	if d := dueLabel(i.t, time.Now()); d != "" {
-		parts = append(parts, d)
-	}
+	var parts []string
 	if s, ok := i.t.Meta[notes.MetaStart]; ok && !i.t.Done && s > time.Now().Format(notes.DateLayout) {
 		parts = append(parts, "starts "+s)
 	}
 	parts = append(parts, fmt.Sprintf("%s · %s/%s:%d", i.n.Title, i.n.Kind, i.n.ID, i.t.Line+1))
-	return strings.Join(parts, " · ")
+	rest := strings.Join(parts, " · ")
+	if d := dueLabel(i.t, time.Now()); d != "" {
+		// A badge sets its own colours, so the text after it is styled too.
+		return d + statusStyle.Render(" · "+rest)
+	}
+	return rest
 }
 
 // priMark is a short priority prefix for a task title.
@@ -207,9 +228,9 @@ func dueLabel(t notes.Task, now time.Time) string {
 	case t.Done:
 		return "due " + d
 	case d < today:
-		return errStyle.Render("overdue " + d)
+		return badgeOverdue.Render("overdue " + d)
 	case d == today:
-		return filterStyle.Render("due today")
+		return badgeToday.Render("due today")
 	}
 	return "due " + d
 }
@@ -309,7 +330,6 @@ var (
 	priHigh     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#F7768E"))
 	priMed      = lipgloss.NewStyle().Foreground(lipgloss.Color("#E0AF68"))
 	priLow      = lipgloss.NewStyle().Foreground(lipgloss.Color("#7AA2F7"))
-	paneBorder  = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("238"))
 )
 
 type model struct {
@@ -362,6 +382,45 @@ type model struct {
 	listW   int
 	preview string // key of note currently previewed
 	pending string // first key of a two-key sequence (g, d, Z)
+
+	inputTitle  string      // the input prompt's question, shown as its dialog title
+	previewPref previewPref // P: show or hide the preview pane (auto: by width)
+
+	focusPreview bool // tab: keys scroll the preview instead of moving in the list
+
+	bodyLinks []notes.BodyLink // the previewed note's links (n / N cycle them)
+	linkIdx   int              // highlighted link, or -1
+	linksKey  string           // note (and version) bodyLinks was read from
+	back      []string         // notes left by following links (backspace)
+
+	mouse        bool      // tui_mouse: the mouse is on (for the hints)
+	rowH         int       // lines per list row (for mouse clicks)
+	lastClickRow int       // row (or suggestion) last clicked, for double clicks
+	lastClick    time.Time // when
+}
+
+// previewPref is whether the preview pane shows: by window width, or as P
+// last set it.
+type previewPref int
+
+const (
+	previewAuto previewPref = iota
+	previewOn
+	previewOff
+)
+
+// narrowWidth is the window width below which the preview hides (auto).
+const narrowWidth = 80
+
+// showPreview reports whether the preview pane is drawn.
+func (m *model) showPreview() bool {
+	switch m.previewPref {
+	case previewOn:
+		return true
+	case previewOff:
+		return false
+	}
+	return m.width >= narrowWidth
 }
 
 func newModel(app *cli.App, style string) model {
@@ -380,7 +439,7 @@ func newModel(app *cli.App, style string) model {
 	ti := textinput.New()
 	ti.CharLimit = 200
 
-	m := model{app: app, style: style, list: l, view: viewport.New(0, 0), help: viewport.New(0, 0), input: ti, cmdInput: newCmdInput(), cache: map[string]string{}, cmdHistIdx: -1}
+	m := model{app: app, style: style, list: l, view: viewport.New(0, 0), help: viewport.New(0, 0), input: ti, cmdInput: newCmdInput(), cache: map[string]string{}, cmdHistIdx: -1, linkIdx: -1}
 	if p, err := commands.HistoryPath(); err == nil {
 		m.cmdHistPath = p
 		m.cmdHist = commands.LoadHistory(p)
@@ -401,6 +460,7 @@ func newModel(app *cli.App, style string) model {
 		}
 	}
 	m.fmOpen = !app.Cfg.FrontmatterCollapsed
+	m.mouse = app.Cfg.TUIMouse
 	m.reload()
 	m.applyStartPage()
 	return m
@@ -418,6 +478,7 @@ func (m *model) setItemHeight(items []list.Item) {
 	d := newDelegate()
 	d.SetHeight(h)
 	m.list.SetDelegate(d)
+	m.rowH = h
 }
 
 func (m model) Init() tea.Cmd { return nil }
@@ -640,23 +701,29 @@ func (m *model) layout() {
 	if m.width == 0 {
 		return
 	}
-	listW := m.width * 2 / 5
-	if listW < 28 {
-		listW = 28
-	}
 	bodyH := m.height - 4 // tabs + filter line + status + help
 	if bodyH < 3 {
 		bodyH = 3
 	}
-	m.list.SetSize(listW, bodyH)
+	// Both panes are boxed: the list (width listW) and, with a space
+	// between, the preview (width pw), together filling the window.
+	listW, pw := m.width, 0
+	if m.showPreview() {
+		listW = max(m.width*2/5, 28)
+		pw = max(m.width-listW-1, 12)
+	}
 	m.listW = listW
-	pw := m.width - listW - 3
-	if pw < 10 {
-		pw = 10
+	if !m.showPreview() {
+		m.focusPreview = false
+	}
+	m.list.SetSize(max(listW-3, 1), bodyH-2) // box border + left margin
+	headerWidth = m.list.Width()
+	if pw == 0 {
+		pw = m.width // hidden: the renderer still needs a width
 	}
 	m.view.Width, m.view.Height = pw-2, bodyH-2
 	m.sizeHelp()
-	r, err := glamour.NewTermRenderer(glamour.WithStandardStyle(m.style), glamour.WithWordWrap(m.view.Width-2))
+	r, err := glamour.NewTermRenderer(glamour.WithStyles(glamourConfig()), glamour.WithWordWrap(m.view.Width-2))
 	if err == nil {
 		m.render = r
 		m.resetCache()
@@ -668,8 +735,20 @@ func (m *model) layout() {
 func (m *model) updatePreview() {
 	var content, k string
 	if n := m.selected(); n != nil {
+		m.syncLinks(n)
 		k = n.Path + n.Updated.String()
+		if m.linkIdx >= 0 {
+			k += fmt.Sprintf("#link%d", m.linkIdx)
+		}
 		if k == m.preview {
+			return
+		}
+		if m.linkIdx >= 0 {
+			// A highlighted link: rendered afresh (not cached) and scrolled to.
+			out, line := m.renderWithLink(n)
+			m.preview = k
+			m.view.SetContent(out + m.linkedFrom(n))
+			m.scrollToLine(line)
 			return
 		}
 		out, ok := m.cache[k]
@@ -703,23 +782,38 @@ func (m *model) updatePreview() {
 		b.WriteString("\n  enter: filter Pages/Journal by this tag\n")
 		content = b.String()
 	} else {
-		msg := "\n  Nothing here yet. Press n to create a note, T for today's journal."
-		if m.tab == tabTasks {
-			msg = "\n  No tasks found. Add \"- [ ] something\" to a note."
-			if m.allTasks && (m.taskShow != showAll || m.taskWhen != notes.WhenAny) {
-				msg += "\n  (filtered: " + m.taskFilterText() + ". a / w change it)"
-			}
-		}
-		content = statusStyle.Render(msg)
+		content = m.emptyView()
 	}
 	m.preview = k
 	m.view.SetContent(content)
 	m.view.GotoTop()
 }
 
+// emptyView fills the preview when nothing is selected: a short note on
+// why, centred, with the keys that help.
+func (m *model) emptyView() string {
+	lines := []string{catStyle.Render("=^.^="), ""}
+	switch {
+	case m.tab == tabTasks:
+		lines = append(lines, "No tasks found.", statusStyle.Render(`Add "- [ ] something" to a note.`))
+		if m.allTasks && (m.taskShow != showAll || m.taskWhen != notes.WhenAny) {
+			lines = append(lines, "", statusStyle.Render("filtered: "+m.taskFilterText()), keyHints("a", "open/done", "w", "dates"))
+		}
+	case m.query != "" || m.tagFilter != "":
+		lines = append(lines, "No notes match.", "", keyHints("esc", "clear the search and tag filter"))
+	default:
+		lines = append(lines, "Nothing here yet.", "", keyHints("n", "new note", "J", "today's journal"))
+	}
+	block := lipgloss.JoinVertical(lipgloss.Center, lines...)
+	return lipgloss.Place(m.view.Width, m.view.Height, lipgloss.Center, lipgloss.Center, block)
+}
+
+// startInput asks for a value in a dialog; prompt is its question.
 func (m *model) startInput(p inputPurpose, prompt, value string) tea.Cmd {
 	m.mode, m.purpose = modeInput, p
-	m.input.Prompt = prompt
+	m.inputTitle = strings.TrimSuffix(strings.TrimSpace(prompt), ":")
+	m.input.Prompt = "› "
+	m.input.Width = max(m.dialogWidth()-4, 10)
 	m.input.SetValue(value)
 	m.input.CursorEnd()
 	return m.input.Focus()
@@ -841,6 +935,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.reload()
 		return m, nil
 
+	case tea.MouseMsg:
+		return m.updateMouse(msg)
+
 	case tea.KeyMsg:
 		switch m.mode {
 		case modeInput:
@@ -880,6 +977,11 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.setStatus(k + "…")
 		return m, nil
 	}
+	if m.focusPreview {
+		if done, cmd := m.previewKey(k); done {
+			return m, cmd
+		}
+	}
 	switch k {
 	case "q", "ctrl+c":
 		return m, tea.Quit
@@ -888,7 +990,10 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "?", "f1":
 		m.openHelp()
 		return m, nil
-	case "tab", "right", "l":
+	case "tab":
+		m.setFocusPreview(true)
+		return m, nil
+	case "right", "l":
 		m.switchTab((m.tab + 1) % tab(len(tabNames)))
 		return m, nil
 	case "shift+tab", "left", "h":
@@ -992,6 +1097,16 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.setStatus("tasks: " + m.taskFilterText())
 		}
 		return m, nil
+	case "P":
+		if m.showPreview() {
+			m.previewPref = previewOff
+			m.setStatus("preview hidden (P shows it)")
+		} else {
+			m.previewPref = previewOn
+			m.setStatus("preview shown")
+		}
+		m.layout()
+		return m, nil
 	case "F":
 		m.fmOpen = !m.fmOpen
 		m.resetCache()
@@ -1052,14 +1167,23 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "R":
 		m.reloadAll()
 		return m, nil
+	case "backspace":
+		m.goBack()
+		return m, nil
 	case "ctrl+d", "ctrl+u":
 		m.halfPage(k == "ctrl+d")
 		return m, nil
 	case "ctrl+e":
-		m.view.LineDown(1)
+		m.scrollPreview(1)
 		return m, nil
 	case "ctrl+y":
-		m.view.LineUp(1)
+		m.scrollPreview(-1)
+		return m, nil
+	case "]":
+		m.scrollPreview(wheelStep)
+		return m, nil
+	case "[":
+		m.scrollPreview(-wheelStep)
 		return m, nil
 	case "pgdown":
 		m.view.HalfPageDown()
@@ -1080,6 +1204,10 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m model) updateSeq(seq string) (tea.Model, tea.Cmd) {
 	switch seq {
 	case "gg":
+		if m.focusPreview {
+			m.view.GotoTop()
+			break
+		}
 		m.list.Select(0)
 		m.skipHeaders("down")
 		m.updatePreview()
@@ -1101,6 +1229,69 @@ func (m model) updateSeq(seq string) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	}
 	return m, nil
+}
+
+// setFocusPreview moves the keyboard focus to the preview (on) or back to
+// the list. The preview can't take it while hidden.
+func (m *model) setFocusPreview(on bool) {
+	if on && !m.showPreview() {
+		m.setStatus("the preview is hidden (P shows it)")
+		return
+	}
+	if m.focusPreview == on {
+		return
+	}
+	m.focusPreview = on
+	if on {
+		m.setStatus("preview focused: j/k scroll · tab or esc back to the list")
+	} else {
+		m.setStatus("")
+	}
+}
+
+// previewKey handles a key while the preview has the focus: the movement
+// keys scroll it, and tab / esc hand the focus back to the list. Other keys
+// (e edit, p preview, :, ?…) do what they always do, so it returns false.
+func (m *model) previewKey(k string) (bool, tea.Cmd) {
+	switch k {
+	case "n":
+		m.cycleLink(1)
+	case "N":
+		m.cycleLink(-1)
+	case "b":
+		m.goBack()
+	case "enter":
+		if m.linkIdx < 0 {
+			return false, nil // no link highlighted: edit the note as usual
+		}
+		return true, m.openSelectedLink()
+	case "tab", "esc":
+		m.setFocusPreview(false)
+	case "j", "down", "ctrl+e":
+		m.scrollPreview(1)
+	case "k", "up", "ctrl+y":
+		m.scrollPreview(-1)
+	case "ctrl+d", "pgdown", " ", "ctrl+f":
+		m.view.HalfPageDown()
+	case "ctrl+u", "pgup", "ctrl+b":
+		m.view.HalfPageUp()
+	case "G", "end":
+		m.view.GotoBottom()
+	case "home":
+		m.view.GotoTop()
+	default:
+		return false, nil
+	}
+	return true, nil
+}
+
+// scrollPreview scrolls the preview n lines (up when n < 0).
+func (m *model) scrollPreview(n int) {
+	if n < 0 {
+		m.view.ScrollUp(-n)
+	} else {
+		m.view.ScrollDown(n)
+	}
 }
 
 // halfPage moves the list selection half a screen, like vim's ctrl+d/u.
@@ -1198,7 +1389,7 @@ func (m *model) reloadAll() {
 func (m *model) openHelp() {
 	m.mode = modeHelp
 	m.sizeHelp()
-	m.help.SetContent(helpBody())
+	m.help.SetContent(helpBody(m.help.Width))
 	m.help.GotoTop()
 }
 
@@ -1318,7 +1509,7 @@ func (m model) View() string {
 	}
 	var tabs []string
 	for i, name := range tabNames {
-		label := fmt.Sprintf("%d %s", i+1, name)
+		label := tabLabel(i, name)
 		if tab(i) == m.tab {
 			tabs = append(tabs, activeTab.Render(label))
 		} else {
@@ -1362,11 +1553,31 @@ func (m model) View() string {
 		filterLine += "  " + filterStyle.Render("filter: "+strings.Join(filters, " + ")+"  (esc clears)")
 	}
 
-	body := lipgloss.JoinHorizontal(lipgloss.Top,
-		lipgloss.NewStyle().Width(m.listW).Render(m.list.View()),
-		" ",
-		paneBorder.Width(m.view.Width).Height(m.view.Height).Render(m.view.View()),
-	)
+	// A column of space keeps the selection bar off the box's border.
+	list := lipgloss.NewStyle().PaddingLeft(1).Render(m.list.View())
+	// The focused pane has the accent border.
+	listC, prevC := accentColor, borderColor
+	if m.focusPreview {
+		listC, prevC = borderColor, accentColor
+	}
+	body := titledBox(list, m.list.Width()+1, m.list.Height(), listC, m.listTitle(), m.listPosition())
+	if m.showPreview() {
+		footer := ""
+		if m.linkIdx >= 0 && len(m.bodyLinks) > 0 {
+			footer = fmt.Sprintf("link %d/%d", m.linkIdx+1, len(m.bodyLinks))
+		}
+		if m.view.TotalLineCount() > m.view.Height {
+			if footer != "" {
+				footer += " · "
+			}
+			footer += fmt.Sprintf("%3.0f%% · [ ] scroll", m.view.ScrollPercent()*100)
+			if m.mouse {
+				footer += " · wheel"
+			}
+		}
+		body = lipgloss.JoinHorizontal(lipgloss.Top, body, " ",
+			titledBox(m.view.View(), m.view.Width, m.view.Height, prevC, m.previewTitle(), footer))
+	}
 
 	var bottom string
 	switch m.mode {
@@ -1376,9 +1587,13 @@ func (m model) View() string {
 	case modeSearch:
 		bottom = m.searchBarView()
 	case modeInput:
-		bottom = m.input.View()
+		body = overlayCenter(body, modal(m.inputTitle, m.input.View(), "enter ok · esc cancel", m.dialogWidth(), accentColor), m.width)
 	case modeConfirm:
-		bottom = errStyle.Render(fmt.Sprintf("Delete %s (%q)? y/N", m.confirm.Key(), m.confirm.Title))
+		what := fmt.Sprintf("%s\n%s", m.confirm.Title, statusStyle.Render(m.confirm.Key()))
+		body = overlayCenter(body, modal("Delete this note?", what, "y delete · any other key cancels", m.dialogWidth(), dangerColor), m.width)
+	}
+	switch m.mode {
+	case modeCommand, modeSearch:
 	default:
 		if m.status != "" {
 			if m.isErr {
@@ -1391,15 +1606,85 @@ func (m model) View() string {
 	if m.mode == modeHelp {
 		return m.helpView()
 	}
-	help := statusStyle.Render(": commands · ? help · n new · enter/e edit · p preview · r rename · T tags · L link · dd delete · J today · / search · t tag · tab switch · ctrl+e/y scroll · q quit")
+	help := statusStyle.Render(": commands · ? help · n new · enter/e edit · p preview · r rename · T tags · L link · dd delete · J today · / search · t tag · tab preview · l/h tabs · [ ] scroll preview · q quit")
 	if m.tab == tabTasks {
 		view := "v all tasks"
 		if m.allTasks {
 			view = "v notes · a done · x check · @ due · p priority"
 		}
-		help = statusStyle.Render(": commands · ? help · enter edit at task · " + view + " · / search · t tag · tab switch · q quit")
+		help = statusStyle.Render(": commands · ? help · enter edit at task · " + view + " · / search · t tag · tab preview · l/h tabs · q quit")
 	}
+	if m.focusPreview {
+		help = statusStyle.Render("preview: n/N links · enter open · b/⌫ back · j/k scroll · space/ctrl+d/u page · gg/G ends · e edit · tab/esc list")
+	}
+	help = ansi.Truncate(help, m.width, "…")
 	return lipgloss.JoinVertical(lipgloss.Left, header, filterLine, body, bottom, help)
+}
+
+// dialogWidth is the inner width of the input and confirm dialogs.
+func (m *model) dialogWidth() int { return max(min(60, m.width-8), 20) }
+
+// listTitle names what the list shows, for its border: the tab and its
+// order or view, or the links / picked list it shows instead.
+func (m *model) listTitle() string {
+	switch {
+	case m.pick != nil:
+		return m.pick.title
+	case m.links != nil && m.links.back:
+		return "linking to " + m.links.of.Title
+	case m.links != nil:
+		return "linked from " + m.links.of.Title
+	}
+	t := tabNames[m.tab]
+	switch m.tab {
+	case tabPages:
+		t += " · " + sortNames[m.sortFor(notes.KindPage)]
+	case tabJournal:
+		t += " · " + sortNames[m.sortFor(notes.KindJournal)]
+	case tabTasks:
+		if m.allTasks {
+			t += " · all tasks"
+		} else {
+			t += " · by note"
+		}
+	}
+	return t
+}
+
+// listPosition is "3/12": the selected row among the list's rows (month
+// headers not counted).
+func (m *model) listPosition() string {
+	pos, n := 0, 0
+	sel := m.list.Index()
+	for i, it := range m.list.Items() {
+		if _, ok := it.(headerItem); ok {
+			continue
+		}
+		n++
+		if i <= sel {
+			pos = n
+		}
+	}
+	if n == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d/%d", pos, n)
+}
+
+// previewTitle names what the preview shows, for its border.
+func (m *model) previewTitle() string {
+	if n := m.selected(); n != nil {
+		return n.Title
+	}
+	switch it := m.list.SelectedItem().(type) {
+	case tagItem:
+		return "#" + it.t.Tag
+	case missingItem:
+		return "(missing) " + it.l.Title
+	case savedItem:
+		return "🔎 " + it.s.Name
+	}
+	return "Preview"
 }
 
 // help popup
@@ -1415,19 +1700,27 @@ var (
 
 type helpEntry struct{ key, desc string }
 
-var helpSections = []struct {
+// helpSec is a titled group of keys in the help.
+type helpSec struct {
 	title   string
 	entries []helpEntry
-}{
+}
+
+var helpSections = []helpSec{
 	{"Navigation", []helpEntry{
 		{"↑/↓  j/k", "move selection"},
 		{"gg / G", "first / last item"},
 		{"ctrl+d / ctrl+u", "half a page down / up the list"},
 		{"ctrl+f / ctrl+b", "next / previous page of the list"},
-		{"tab  l  gt", "next tab"},
+		{"tab", "focus the preview: j/k, ctrl+d/u, space, gg/G scroll it; tab or esc goes back"},
+		{"n / N", "focused preview: highlight the next / previous link"},
+		{"enter", "focused preview: open the highlighted link (note: show it · missing: create it · URL: browser)"},
+		{"b / backspace", "back to the note you followed a link from (b: in the focused preview)"},
+		{"l  →  gt", "next tab"},
 		{"shift+tab h gT", "previous tab"},
 		{"1 2 3 4", "Pages / Journal / Tags / Tasks"},
-		{"ctrl+e / ctrl+y", "scroll the preview a line (pgdn/pgup: half a page)"},
+		{"] / [", "scroll the preview (also ctrl+e/y a line, pgdn/pgup half a page, mouse wheel)"},
+		{"P", "show or hide the preview pane (hidden below 80 columns)"},
 	}},
 	{"Notes", []helpEntry{
 		{"n", "new page (or journal entry on the Journal tab)"},
@@ -1463,40 +1756,74 @@ var helpSections = []struct {
 	{"General", []helpEntry{
 		{":", "command window: :open, :tag add, :set, :frontmatter… (tab completes, ↑ history)"},
 		{"? / F1", "toggle this help"},
+		{"mouse", "click tabs, rows and search modes; double-click opens; the wheel scrolls (tui_mouse = false turns it off; hold shift to select text)"},
 		{"q  ZZ  :q", "quit (also ctrl+c)"},
 	}},
 }
 
-func helpBody() string {
+// helpTwoColumns is the help width from which the key sections are laid
+// out in two columns.
+const helpTwoColumns = 120
+
+// helpBody is the help text for a box w wide: the key sections (in two
+// columns when there's room), then the commands.
+func helpBody(w int) string {
 	var b strings.Builder
-	for i, sec := range helpSections {
+	if w >= helpTwoColumns {
+		colW := (w - 2) / 2
+		split := 2 // Navigation, Notes | Tasks, Finding, General (about even)
+		left := helpSectionsText(helpSections[:split], colW)
+		right := helpSectionsText(helpSections[split:], colW)
+		b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top,
+			lipgloss.NewStyle().Width(colW).Render(left), "  ",
+			lipgloss.NewStyle().Width(colW).Render(right)))
+		b.WriteString("\n")
+	} else {
+		b.WriteString(helpSectionsText(helpSections, w))
+	}
+	// The same command list as the GUI's help (from the shared catalog).
+	b.WriteString("\n" + helpSection.Render("Commands (:)") + "\n")
+	desc := lipgloss.NewStyle().Width(max(w-6, 10))
+	for _, c := range commands.Catalog(commands.AppTUI) {
+		b.WriteString("  " + helpCmd.Render(":"+c.Usage()) + "\n")
+		b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, "      ", desc.Render(c.Desc)) + "\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// helpSectionsText renders key sections w wide, wrapping each description
+// under itself rather than under the key.
+func helpSectionsText(secs []helpSec, w int) string {
+	descW := max(w-2-helpKey.GetWidth(), 10)
+	desc := lipgloss.NewStyle().Width(descW)
+	var b strings.Builder
+	for i, sec := range secs {
 		if i > 0 {
 			b.WriteString("\n")
 		}
 		b.WriteString(helpSection.Render(sec.title) + "\n")
 		for _, e := range sec.entries {
-			b.WriteString("  " + helpKey.Render(e.key) + e.desc + "\n")
+			row := lipgloss.JoinHorizontal(lipgloss.Top, "  ", helpKey.Render(e.key), desc.Render(e.desc))
+			b.WriteString(row + "\n")
 		}
 	}
-	// The same command list as the GUI's help (from the shared catalog).
-	b.WriteString("\n" + helpSection.Render("Commands (:)") + "\n")
-	for _, c := range commands.Catalog(commands.AppTUI) {
-		b.WriteString("  " + helpCmd.Render(":"+c.Usage()) + "\n      " + c.Desc + "\n")
-	}
-	return strings.TrimRight(b.String(), "\n")
+	return b.String()
 }
 
-func helpLines() int { return strings.Count(helpBody(), "\n") + 1 }
+func helpLines(w int) int { return strings.Count(helpBody(w), "\n") + 1 }
 
 // sizeHelp fits the help viewport to its content, capped by the window.
 func (m *model) sizeHelp() {
 	w := 64
+	if m.width >= helpTwoColumns+20 {
+		w = helpTwoColumns + 8
+	}
 	if m.width-6 < w {
 		w = m.width - 6
 	}
 	// box border (2) + banner (1) + blank (1) + footer (1) + margin (2)
 	h := m.height - 7
-	if n := helpLines(); n < h {
+	if n := helpLines(w); n < h {
 		h = n
 	}
 	if w < 10 {
@@ -1527,7 +1854,8 @@ func (m model) updateHelp(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m model) helpView() string {
+// helpBox is the help popup, which helpView centres in the window.
+func (m model) helpBox() string {
 	w := m.help.Width
 	banner := helpBanner.Width(w).Render("KatNotes — keyboard help")
 	ver := helpVersion.Width(w).Align(lipgloss.Right).Render("katnotes " + m.app.Version)
@@ -1535,10 +1863,13 @@ func (m model) helpView() string {
 	if !(m.help.AtTop() && m.help.AtBottom()) {
 		foot = fmt.Sprintf("↑/↓ scroll · %3.0f%% · ", m.help.ScrollPercent()*100) + foot
 	}
-	box := helpBox.Render(lipgloss.JoinVertical(lipgloss.Left,
+	return helpBox.Render(lipgloss.JoinVertical(lipgloss.Left,
 		lipgloss.JoinVertical(lipgloss.Left, banner, ver),
 		m.help.View(),
 		statusStyle.Width(w).Align(lipgloss.Right).Render(foot),
 	))
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
+}
+
+func (m model) helpView() string {
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, m.helpBox())
 }

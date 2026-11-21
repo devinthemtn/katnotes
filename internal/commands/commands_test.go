@@ -463,3 +463,24 @@ func TestThemeCommand(t *testing.T) {
 		t.Errorf("completion of shared: %+v", c.Items)
 	}
 }
+
+func TestRunWikiLinks(t *testing.T) {
+	env := newEnv(t)
+	mustCreate(t, env, "Groceries")
+	n, _ := env.Store.Create(notes.KindPage, "Plan", nil, "- [[Groceries]]\n  - milk\n- [[New Thing]]\n")
+	env.Note = n
+	if _, err := Run(env, "wikilinks bogus"); err == nil {
+		t.Fatal("wikilinks bogus: want an error")
+	}
+	r, err := Run(env, "wikilinks move")
+	if err != nil || !r.Changed || !strings.Contains(r.Status, "created page/new-thing") || !strings.Contains(r.Status, "moved 1 block(s) to page/groceries") {
+		t.Fatalf("wikilinks move: %+v %v", r, err)
+	}
+	if r.Note.Body != "- [Groceries](../pages/groceries.md)\n- [New Thing](../pages/new-thing.md)\n" {
+		t.Errorf("body = %q", r.Note.Body)
+	}
+	env.Note = r.Note
+	if r, err = Run(env, "wikilinks"); err != nil || r.Changed || !strings.HasPrefix(r.Status, "no [[links]]") {
+		t.Errorf("second run: %+v %v", r, err)
+	}
+}
