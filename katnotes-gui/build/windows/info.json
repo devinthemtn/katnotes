@@ -1,15 +1,15 @@
 {
 	"fixed": {
-		"file_version": "0.11.1"
+		"file_version": "1.0.0"
 	},
 	"info": {
 		"0409": {
-			"ProductVersion": "0.11.1",
+			"ProductVersion": "1.0.0",
 			"CompanyName": "devinthemtn",
 			"FileDescription": "Personal Markdown notes",
 			"LegalCopyright": "© 2026 devinthemtn",
 			"ProductName": "KatNotes",
-			"Comments": "This is a comment"
+			"Comments": "KatNotes desktop app"
 		}
 	}
 }

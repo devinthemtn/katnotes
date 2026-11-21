@@ -94,6 +94,47 @@ tasks:
         project.nsi
       - echo "Built {{.SETUP}}"
 
+  # The GUI's build files carry their own copy of the version (shown by
+  # Windows file properties, macOS About, Linux packages). Run this before
+  # tagging a release: task bump-version V=1.2.3
+  bump-version:
+    desc: Set the version in the GUI's build files, e.g. task bump-version V=1.2.3
+    requires:
+      vars: [V]
+    preconditions:
+      - sh: echo "{{.V}}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'
+        msg: "V must be x.y.z without a leading v, got {{.V}}"
+    dir: '{{.GUI_DIR}}'
+    cmds:
+      - perl -pi -e 's/^(\s*version:\s*)"[^"]*"/${1}"{{.V}}"/' build/config.yml build/linux/nfpm/nfpm.yaml
+      - perl -pi -e 's/("(?:file_version|ProductVersion)":\s*)"[^"]*"/${1}"{{.V}}"/' build/windows/info.json
+      - perl -0pi -e 's{(<key>CFBundle(?:Short)?Version(?:String)?</key>\s*<string>)[^<]*}{${1}{{.V}}}g' build/darwin/Info.plist build/darwin/Info.dev.plist
+      - cd frontend && npm version --no-git-tag-version --allow-same-version {{.V}} >/dev/null
+      - echo "Version {{.V}} set in katnotes-gui/build and frontend/package.json"
+
+  # Everything a GitHub release carries, in bin/release-<version>/: the Linux
+  # tarball (katnotes + katnotes-gui), the Windows installer and SHA256SUMS.
+  # Run it on the tagged commit, so the version is the tag.
+  release:
+    desc: Build the release files into bin/release-<version>/ (run on a tagged, clean commit)
+    vars:
+      OUT: '{{.BIN_DIR}}/release-{{.VERSION}}'
+      TARBALL: 'katnotes_{{.VERSION}}_linux_amd64.tar.gz'
+    preconditions:
+      - sh: git describe --tags --exact-match >/dev/null 2>&1
+        msg: "HEAD has no tag: git tag -a vX.Y.Z first"
+      - sh: git diff --quiet HEAD
+        msg: "the working tree has uncommitted changes"
+    cmds:
+      - task: build
+      - task: build-gui
+      - task: build-win-installer
+      - rm -rf {{.OUT}} && mkdir -p {{.OUT}}
+      - tar czf {{.OUT}}/{{.TARBALL}} -C {{.ROOT_DIR}}/{{.BIN_DIR}} katnotes -C {{.ROOT_DIR}}/{{.GUI_DIR}}/bin katnotes-gui
+      - cp {{.BIN_DIR}}/KatNotes-{{.VERSION}}-windows-amd64-setup.exe {{.OUT}}/
+      - cd {{.OUT}} && sha256sum KatNotes-*-setup.exe {{.TARBALL}} > SHA256SUMS
+      - ls -l {{.OUT}}
+
   dev-gui:
     desc: Run the GUI with hot reload
     cmds:
