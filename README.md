@@ -410,3 +410,7 @@ internal/cli/       cobra commands
 internal/tui/       Bubble Tea app
 katnotes-gui/       Wails v3 app (NotesService + Svelte frontend)
 ```
+
+## License
+
+KatNotes is released under the [MIT License](LICENSE).
