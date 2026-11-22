@@ -324,3 +324,69 @@ func graphCmd(a *App) *cobra.Command {
 	f.StringVar(&format, "format", "text", "text (one edge per line), dot (Graphviz) or json")
 	return cmd
 }
+
+func runCmd(a *App) *cobra.Command {
+	var noteID string
+	cmd := &cobra.Command{
+		Use:   "run [command] [args…]",
+		Short: "Run one of your Lua \":\" commands (no command: list them)",
+		Long: "Runs <config>/commands/<command>.lua as the TUI and GUI command window would,\n" +
+			"with ctx.app = \"cli\". --note gives the script a note (ctx.note, ctx.body).\n" +
+			"Prints the status the script returns, and the note it opens, if any.",
+		Args: cobra.ArbitraryArgs,
+	}
+	kind := kindFlags(cmd)
+	cmd.Flags().StringVar(&noteID, "note", "", "the note the command acts on (an id, kind/id or title)")
+	// Flags after the command name belong to the script.
+	cmd.Flags().SetInterspersed(false)
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		if len(args) == 0 {
+			specs := commands.LuaCommands()
+			if a.jsonOut {
+				type item struct{ Name, Desc string }
+				out := []item{}
+				for _, s := range specs {
+					out = append(out, item{s.Name, s.Desc})
+				}
+				return a.printJSON(out)
+			}
+			if len(specs) == 0 {
+				fmt.Fprintf(a.Out, "no Lua commands in %s\n", commands.LuaDir())
+				return nil
+			}
+			tw := tabwriter.NewWriter(a.Out, 0, 2, 2, ' ', 0)
+			for _, s := range specs {
+				fmt.Fprintf(tw, "%s\t%s\n", s.Name, s.Desc)
+			}
+			return tw.Flush()
+		}
+		env := a.env(nil)
+		if noteID != "" {
+			n, err := a.resolve(noteID, kind())
+			if err != nil {
+				return err
+			}
+			env.Note = n
+		}
+		r, err := commands.ExecLua(env, args[0], args[1:])
+		if err != nil {
+			return err
+		}
+		if a.jsonOut {
+			if r.Note != nil {
+				c := *r.Note
+				c.Body = ""
+				r.Note = &c
+			}
+			return a.printJSON(r)
+		}
+		if r.Status != "" {
+			fmt.Fprintln(a.Out, r.Status)
+		}
+		if r.Note != nil {
+			fmt.Fprintln(a.Out, "open:", r.Note.Key(), r.Note.Path)
+		}
+		return nil
+	}
+	return cmd
+}

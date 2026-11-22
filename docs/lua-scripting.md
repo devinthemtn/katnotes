@@ -7,7 +7,7 @@ There are two kinds:
 | Kind | Where you type it | Folder | Good for |
 |---|---|---|---|
 | **`/` commands** | `/name` in the GUI editor | `<config>/slash/` | inserting or rewriting text where you are typing |
-| **`:` commands** | `:name [args…]` in the command window (`:` in the TUI, Ctrl+Shift+P in the GUI) | `<config>/commands/` | actions: showing information, writing notes, jumping to a note, running programs |
+| **`:` commands** | `:name [args…]` in the command window (`:` in the TUI, Ctrl+Shift+P in the GUI), or `katnotes run name [args…]` | `<config>/commands/` | actions: showing information, writing notes, jumping to a note, running programs |
 
 `<config>` is the KatNotes config folder:
 
@@ -99,7 +99,7 @@ These appear in the command window of both apps, with completion and help, as `:
 | Field | What it holds |
 |---|---|
 | `ctx.args` | everything typed after the name, as one string (`""` if nothing) |
-| `ctx.app` | `"tui"` or `"gui"` |
+| `ctx.app` | `"tui"`, `"gui"` or `"cli"` (`katnotes run`) |
 | `ctx.source` | always `"command"` here |
 | `ctx.body` | the selected (TUI) or open (GUI) note's Markdown, without frontmatter |
 | `ctx.note` | `{ kind, id, title, tags, path }` for that note |
@@ -126,6 +126,12 @@ end
 | `nil` | shows `<name>: done` |
 
 After every run (even a failed one), KatNotes reloads the note list. This means scripts can create or change files in `ctx.notes_dir` and the apps pick up the changes.
+
+### From the command line
+
+`katnotes run` lists your `:` commands, and `katnotes run name [args…]` runs one. It prints the status the script returns and, for `{ open = … }`, the note's key and path. `--note <id>` passes a note in as `ctx.note` and `ctx.body`, and `--json` prints the whole result. Everything after the command name goes to the script, flags included, so `katnotes run todo --urgent` gives `ctx.args = "--urgent"`.
+
+`ctx.app` is `"cli"` here. The terminal shows a multi-line status in full, while the TUI's status bar has room for one line only, so a script can return more detail when `ctx.app == "cli"`.
 
 ### Options
 

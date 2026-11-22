@@ -105,3 +105,34 @@ func TestGitStatus(t *testing.T) {
 		t.Errorf("git status should list the new note:\n%s", out)
 	}
 }
+
+func TestRunLua(t *testing.T) {
+	_, cfgDir := setup(t)
+	mustRun(t, "new", "--no-edit", "Alpha")
+	if out := mustRun(t, "run"); !strings.Contains(out, "no Lua commands") {
+		t.Errorf("run with none: %s", out)
+	}
+	dir := filepath.Join(cfgDir, "commands")
+	os.MkdirAll(dir, 0o755)
+	os.WriteFile(filepath.Join(dir, "hi.lua"), []byte(`return {
+  description = "Say hi",
+  run = function(ctx) return { status = ctx.app .. " " .. ctx.args .. " " .. ctx.note.id, open = ctx.note.id ~= "" and "page/alpha" or nil } end,
+}`), 0o644)
+	os.WriteFile(filepath.Join(dir, "sync.lua"), []byte(`return { run = function() return "shadowed" end }`), 0o644)
+
+	if out := mustRun(t, "run"); !strings.Contains(out, "hi") || !strings.Contains(out, "Say hi") || strings.Contains(out, "sync") {
+		t.Errorf("run list: %s", out)
+	}
+	if out := mustRun(t, "run", "hi", "a", "--b"); strings.TrimSpace(out) != "cli a --b" {
+		t.Errorf("run hi: %q", out)
+	}
+	if out := mustRun(t, "run", "--note", "alpha", "hi", "x"); !strings.Contains(out, "cli x alpha") || !strings.Contains(out, "open: page/alpha") {
+		t.Errorf("run --note: %s", out)
+	}
+	if _, err := run(t, "run", "sync"); err == nil {
+		t.Error("a built-in's name must not run the Lua file")
+	}
+	if _, err := run(t, "run", "nope"); err == nil {
+		t.Error("unknown command should fail")
+	}
+}
