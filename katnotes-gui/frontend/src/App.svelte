@@ -1510,6 +1510,13 @@
   // Replace text[from,to) in the editor, keeping native undo when possible.
   function replaceRange(from: number, to: number, text: string, caret: number) {
     if (!bodyEl) return;
+    // Inserting '' is a delete to WebKit, which on the document's last line
+    // also merges the emptied line into the one above. Take the newline before
+    // the range and put it back instead, so the inserted text is never empty.
+    if (text === '' && from < to && from > 0 && bodyEl.value[from - 1] === '\n') {
+      from--;
+      text = '\n';
+    }
     bodyEl.focus();
     bodyEl.setSelectionRange(from, to);
     // execCommand keeps the textarea undo stack and fires `input` (bind:value + onEdit).
