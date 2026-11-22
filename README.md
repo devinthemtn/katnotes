@@ -163,6 +163,14 @@ Call about [Groceries](../pages/groceries.md) — see [2026-11-17](../journal/20
 
 Find links with grep: `rg '\(\.\./pages/groceries\.md' ~/KatNotes`.
 
+### Graph
+
+The graph shows notes and the links between them: either every note, or only the notes within 1–3 links of one note, counting links in both directions.
+
+- **GUI:** Ctrl+Shift+M, the **◎ Graph** button above the list, or `:graph`. You can show tags as nodes, which joins notes that share a tag, and show links to notes that don't exist yet as dashed nodes. You can also hide journal entries. Click a note to open it; clicking a dashed one creates it. Click a tag to filter the list by it. Drag a node to move it, drag the background to pan, and scroll to zoom. Hovering over a note highlights its neighbours.
+- **TUI:** `gn` (or `:graph`) lists the notes around the selected one, nearest first, and the preview draws its neighbourhood as a tree (`→` links to, `←` linked from). `+` / `-` change the depth. `:graph all` lists every note, most linked first.
+- **CLI:** `katnotes graph [id]` prints one edge per line. `--format dot` gives Graphviz, e.g. `katnotes graph --tags --format dot | dot -Tsvg > graph.svg`, and `--json` (or `--format json`) gives the nodes and edges.
+
 ## CLI
 
 ```
@@ -197,6 +205,7 @@ katnotes tasks set page/<id>:<line> due tomorrow   # set {due:…}; no value rem
 katnotes links <id>            # notes this note links to (marks missing ones)
 katnotes backlinks <id>        # notes that link here, with the lines
 katnotes wikilinks <id> [--move]   # turn [[page]] text into links, creating missing pages
+katnotes graph [id] [--depth N] [--tags] [--missing] [--no-journal] [--format text|dot|json]   # the link graph (with an id: around that note)
 katnotes config path|show|edit|set
 ```
 
@@ -240,6 +249,7 @@ Every command accepts `--json` for scripting. The commands shared with the comma
 | `enter` | Tasks tab: edit the note at the task's line (vim, nano, helix, code and others) |
 | `gb` | notes that link to the selected note (esc closes) |
 | `gf` | notes the selected note links to; `enter` on a (missing) one creates it |
+| `gn` | graph: the notes around the selected note, with a tree of links in the preview; `+` / `-` change the depth (esc closes) |
 | `?` / `F1` | help popup (shows the version; scrolls if the window is short) |
 | `q` / `ZZ` / `:q` | quit |
 
@@ -273,6 +283,7 @@ If a note is changed outside the app (by the CLI, the TUI or another editor), th
 | Ctrl+Space | on a task line: open those suggestions, adding the `{}` block if needed |
 | Ctrl+Shift+P (or `:`) | command palette, the same commands as the TUI's `:` (see [Command window](#command-window)) |
 | Ctrl+Shift+T | all tasks from every note: filter by due date, sort by due, set the due date and priority per task |
+| Ctrl+Shift+M | graph of the links between notes (see [Graph](#graph)) |
 | Ctrl+Shift+O | open the note in the default app (`open_with`) |
 | Ctrl+Shift+Z | zoom: hide the sidebar and top bar |
 | Ctrl+= / Ctrl+- / Ctrl+0 | larger, smaller, reset text size |
@@ -330,6 +341,7 @@ return {
 | `copy-link` | copy a Markdown link to the note |
 | `link <note>` | link this note to another: adds `- [Title](../pages/id.md)` under its `## Links` heading, creating the heading at the end of the note the first time (nothing happens if the link is already there) |
 | `links` / `backlinks` | notes this note links to, or that link to it |
+| `graph [local\|all]` | the link graph: the GUI's graph view, or the TUI's list and tree (see [Graph](#graph)) |
 | `wikilinks [move]` | turn each `[[Page]]` (or `[[Page\|text]]`) in the note into a link to the page with that title (or whose id is its slug), creating the page when there is none; text in code is left alone. With `move`, the lines indented under a line with one link — a `[[Page]]`, or a Markdown link to a note such as one an earlier `wikilinks` or the GUI's `[[` picker wrote — move to that note: they become a new page's body, or go at the end of an existing page under `## From [This note](…)` |
 | `delete` | delete the note (asks first) |
 | `todo <task>` / `todo here <task>` | add `- [ ] task` to today's journal (or this note) without opening an editor; `{due:fri pri:h}` works like in the editor |
