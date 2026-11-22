@@ -368,6 +368,7 @@ type model struct {
 	recentPath  string                 // shared recent-notes file ("" disables)
 	dueTask     *taskItem              // task whose due date the input prompt is editing
 	links       *linkView              // b / f: show a note's backlinks or outgoing links
+	graph       *graphView             // gn / :graph: the notes around a note, or every note by links
 	results     map[string]notes.Match // kind/id -> match while searching
 	searchMode  notes.SearchMode       // name, tags or text ("/" bar; tab cycles)
 	searchInput textinput.Model
@@ -497,6 +498,8 @@ func (m *model) reload() {
 		}
 	case m.links != nil:
 		items, err = m.linkItems()
+	case m.graph != nil:
+		items, err = m.graphItems()
 	case m.tab == tabTasks:
 		if m.allTasks {
 			// Every task, sorted by due date, then priority.
@@ -636,6 +639,7 @@ func (m *model) selectKey(k string) {
 
 // openLinks switches the list to n's backlinks (back) or outgoing links.
 func (m *model) openLinks(n *notes.Note, back bool) {
+	m.graph = nil
 	m.links = &linkView{back: back, of: *n}
 	m.list.Select(0)
 	m.reload()
@@ -734,7 +738,17 @@ func (m *model) layout() {
 
 func (m *model) updatePreview() {
 	var content, k string
-	if n := m.selected(); n != nil {
+	if n := m.selected(); n != nil && m.graph != nil {
+		k = fmt.Sprintf("graph:%s:%d:%s", n.Key(), m.graph.depth, n.Updated)
+		if k == m.preview {
+			return
+		}
+		out, err := graphTree(m.app.Store, n.Key(), m.graph.depth)
+		if err != nil {
+			out = errStyle.Render(err.Error())
+		}
+		content = out
+	} else if n := m.selected(); n != nil {
 		m.syncLinks(n)
 		k = n.Path + n.Updated.String()
 		if m.linkIdx >= 0 {
@@ -984,6 +998,14 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 	}
+	if m.graph != nil && (k == "+" || k == "=" || k == "-") {
+		if k == "-" {
+			m.graphDepth(-1)
+		} else {
+			m.graphDepth(1)
+		}
+		return m, nil
+	}
 	switch k {
 	case "q", "ctrl+c":
 		return m, tea.Quit
@@ -1016,6 +1038,13 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.clearViews()
 			m.list.Select(0)
 			m.setStatus("links view closed")
+			m.reload()
+			return m, nil
+		}
+		if m.graph != nil {
+			m.clearViews()
+			m.list.Select(0)
+			m.setStatus("graph closed")
 			m.reload()
 			return m, nil
 		}
@@ -1224,6 +1253,10 @@ func (m model) updateSeq(seq string) (tea.Model, tea.Cmd) {
 	case "gf", "gb":
 		if n := m.selected(); n != nil {
 			m.openLinks(n, seq == "gb")
+		}
+	case "gn":
+		if n := m.selected(); n != nil {
+			m.openGraph(n)
 		}
 	case "dd":
 		m.confirmDelete()
@@ -1543,6 +1576,9 @@ func (m model) View() string {
 	if m.tab == tabTasks && m.allTasks {
 		filters = append(filters, m.taskFilterText())
 	}
+	if m.graph != nil {
+		filters = append(filters, m.graphTitle())
+	}
 	if m.links != nil {
 		if m.links.back {
 			filters = append(filters, "linking to "+m.links.of.Title)
@@ -1636,6 +1672,8 @@ func (m *model) listTitle() string {
 		return "linking to " + m.links.of.Title
 	case m.links != nil:
 		return "linked from " + m.links.of.Title
+	case m.graph != nil:
+		return m.graphTitle()
 	}
 	t := tabNames[m.tab]
 	switch m.tab {
@@ -1750,10 +1788,11 @@ var helpSections = []helpSec{
 		{"s", "sort Pages/Journal: modified · created · title (remembered)"},
 		{"t", "filter by tag"},
 		{"enter", "on the Tags tab: filter by that tag, or run a 🔎 saved search"},
-		{"esc", "clear search and tag filter (or close the links / :recent list)"},
+		{"esc", "clear search and tag filter (or close the links / graph / :recent list)"},
 		{"p / gx", "open the selected note in the Markdown previewer (config: previewer)"},
 		{"gb", "notes that link to the selected note (backlinks)"},
 		{"gf", "notes the selected note links to; enter on (missing) creates it"},
+		{"gn / :graph", "graph: the notes around the selected note, as a tree (+/- depth; :graph all lists every note)"},
 	}},
 	{"General", []helpEntry{
 		{":", "command window: :open, :tag add, :set, :frontmatter… (tab completes, ↑ history)"},
