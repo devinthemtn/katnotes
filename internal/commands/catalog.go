@@ -257,6 +257,9 @@ func init() {
 		}, run: runWikiLinks},
 		{Name: "links", Desc: "Notes this note links to", NeedsNote: true, run: runLinks},
 		{Name: "backlinks", Desc: "Notes that link to this note", NeedsNote: true, run: runBacklinks},
+		{Name: "graph", Desc: "Show the link graph: all notes, or local (around this note)", UI: true, Apps: []string{AppTUI, AppGUI}, Args: []Arg{
+			{Name: "scope", Kind: ArgChoice, Optional: true, Choices: []string{"local", "all"}},
+		}},
 		{Name: "frontmatter", Desc: "Edit the note's frontmatter as YAML (adds one if missing)", NeedsNote: true, UI: true},
 		{Name: "delete", Desc: "Delete the note (asks first)", NeedsNote: true, UI: true},
 		{Name: "tasks", Desc: "Show tasks from every note: open|done|all, any|overdue|week", UI: true, Args: []Arg{
