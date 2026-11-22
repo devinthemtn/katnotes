@@ -36,6 +36,9 @@ func TestSubcommands(t *testing.T) {
 		{[]string{"link", "beta"}, []string{link}},
 		{[]string{"links", "alpha"}, []string{"page/beta", "Beta"}},
 		{[]string{"backlinks", "beta"}, []string{"page/alpha"}},
+		{[]string{"graph"}, []string{"page/alpha -> page/beta"}},
+		{[]string{"graph", "beta", "--tags", "--format", "dot"}, []string{`"page/alpha" -> "page/beta"`, `"page/beta" [label="Beta", penwidth=2]`}},
+		{[]string{"graph", "alpha", "--tags"}, []string{"page/alpha -- tag:work"}},
 		{[]string{"tags"}, []string{"work"}},
 		{[]string{"today", "--no-edit"}, []string{filepath.Join(notesDir, "journal")}},
 		{[]string{"edit", "beta"}, nil},                  // $EDITOR is true(1)
@@ -55,6 +58,11 @@ func TestSubcommands(t *testing.T) {
 		}
 	}
 
+	var g notes.Graph
+	if err := json.Unmarshal([]byte(mustRun(t, "graph", "--json")), &g); err != nil || len(g.Edges) != 1 {
+		t.Errorf("graph --json: %+v, %v", g, err)
+	}
+
 	var n notes.Note
 	if err := json.Unmarshal([]byte(mustRun(t, "show", "--json", "alpha")), &n); err != nil || n.Title != "Alpha" {
 		t.Errorf("show --json: %+v, %v", n, err)
@@ -67,6 +75,8 @@ func TestSubcommandErrors(t *testing.T) {
 		{"show", "nope"},
 		{"edit", "nope"},
 		{"links", "nope"},
+		{"graph", "nope"},
+		{"graph", "--format", "png"},
 		{"config", "set", "tui_mouse", "maybe"},
 		{"config", "set", "no_such_key", "x"},
 		{"theme", "--app", "phone", "dark"},

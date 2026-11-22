@@ -263,3 +263,64 @@ func savedCmd(a *App) *cobra.Command {
 	})
 	return cmd
 }
+
+func graphCmd(a *App) *cobra.Command {
+	var o notes.GraphOpts
+	var noJournal bool
+	var format string
+	cmd := &cobra.Command{
+		Use:   "graph [id]",
+		Short: "Print the link graph between notes (with an id: just the notes around it)",
+		Long: "Prints every note and the links between them, or with an id only the notes\n" +
+			"within --depth links of it (either direction). --format dot is Graphviz:\n" +
+			"  katnotes graph --format dot | dot -Tsvg > graph.svg",
+		Args: cobra.MaximumNArgs(1),
+	}
+	kind := kindFlags(cmd)
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		if len(args) == 1 {
+			n, err := a.resolve(args[0], kind())
+			if err != nil {
+				return err
+			}
+			o.Center = n.Key()
+		}
+		o.Journal = !noJournal
+		g, err := a.Store.Graph(o)
+		if err != nil {
+			return err
+		}
+		if a.jsonOut {
+			format = "json"
+		}
+		switch format {
+		case "json":
+			return a.printJSON(g)
+		case "dot":
+			_, err = fmt.Fprint(a.Out, g.DOT())
+			return err
+		case "text":
+			for _, e := range g.Edges {
+				arrow := "->"
+				if e.Type == notes.EdgeTag {
+					arrow = "--"
+				}
+				fmt.Fprintf(a.Out, "%s %s %s\n", e.From, arrow, e.To)
+			}
+			for _, n := range g.Nodes {
+				if n.Degree == 0 {
+					fmt.Fprintln(a.Out, n.Key)
+				}
+			}
+			return nil
+		}
+		return fmt.Errorf("graph: unknown --format %q (text, dot or json)", format)
+	}
+	f := cmd.Flags()
+	f.IntVar(&o.Depth, "depth", 1, "with an id: how many links away to go (1-3)")
+	f.BoolVar(&o.Tags, "tags", false, "include tags as nodes")
+	f.BoolVar(&o.Missing, "missing", false, "include links to notes that don't exist yet")
+	f.BoolVar(&noJournal, "no-journal", false, "leave out journal entries")
+	f.StringVar(&format, "format", "text", "text (one edge per line), dot (Graphviz) or json")
+	return cmd
+}
