@@ -140,6 +140,14 @@ tasks:
     cmds:
       - '{{.GUI_TASK}} dev'
 
+  dev-tui:
+    desc: 'Run the TUI from source (args after --, e.g. task dev-tui -- --dir /tmp/notes)'
+    interactive: true
+    env:
+      CGO_ENABLED: '0'
+    cmds:
+      - go run -ldflags="{{.LDFLAGS}}" ./cmd/katnotes {{.CLI_ARGS}}
+
   bindings:
     desc: Regenerate the GUI's TypeScript bindings
     dir: '{{.GUI_DIR}}'
