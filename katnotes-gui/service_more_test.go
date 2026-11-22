@@ -25,6 +25,9 @@ func TestServiceLinksRenameAndRecent(t *testing.T) {
 	a := must(s.Create("page", "Alpha", nil))
 	must(s.Save("page", a.ID, nil, "see "+notes.LinkMarkdown(notes.KindPage, "beta", "Beta")+"\n", a.Stamp, false))
 
+	if g := must(s.Graph("page/beta", 1, false, false, true)); len(g.Edges) != 1 || g.Edges[0].From != "page/alpha" {
+		t.Errorf("graph = %+v", g)
+	}
 	if bl := must(s.Backlinks("page", "beta")); len(bl) != 1 || bl[0].Note.ID != "alpha" {
 		t.Fatalf("backlinks: %+v", bl)
 	}
