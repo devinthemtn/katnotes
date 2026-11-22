@@ -221,7 +221,7 @@ Every command accepts `--json` for scripting. The commands shared with the comma
 | `ctrl+d` / `ctrl+u` | half a page down / up the list |
 | `ctrl+f` / `ctrl+b` | next / previous page of the list |
 | `tab` | move the focus to the note preview: `j`/`k`, `ctrl+d`/`ctrl+u`, space, `gg`/`G` then scroll it; `tab` or `esc` goes back to the list (clicking either pane focuses it too) |
-| `n` / `N`, `enter` (focused preview) | highlight the next / previous link in the note (it scrolls into view), then open it: a note is shown here (a missing one is created and opened in your editor), a URL or other file opens in the system's default app |
+| `n` / `N`, `enter` (focused preview) | highlight the next / previous link in the note, then the notes in its "Linked from" footer (it scrolls into view), and open it: a note is shown here (a missing one is created and opened in your editor), a URL or other file opens in the system's default app |
 | `b` (focused preview) / `backspace` | back to the note you followed a link from |
 | `l` / `h` / `1`–`4` / `gt` / `gT` / `shift+tab` | switch between Pages, Journal, Tags and Tasks |
 | `ctrl+e` / `ctrl+y` | scroll the preview a line (`pgdn` / `pgup`: half a page) |

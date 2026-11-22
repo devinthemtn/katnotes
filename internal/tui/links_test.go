@@ -283,3 +283,42 @@ func TestPreviewBodyEdits(t *testing.T) {
 		t.Errorf("bare URL highlight: %q", got)
 	}
 }
+
+// n / N also cycle the notes in the "Linked from" footer, after the body's
+// own links; enter opens one.
+func TestCycleBacklinks(t *testing.T) {
+	st := notes.New(t.TempDir())
+	if err := st.Init(); err != nil {
+		t.Fatal(err)
+	}
+	st.Create(notes.KindPage, "Groceries", nil, "see [Ideas](../pages/ideas.md)\n")
+	st.Create(notes.KindPage, "Plan", nil, "buy [Groceries](../pages/groceries.md)\n")
+	m := newModel(&cli.App{Store: st, Out: io.Discard}, "dark")
+	m.width, m.height = 100, 30
+	m.layout()
+	m.reload()
+	m.selectKey("page/groceries")
+	keyMsg(&m, tea.KeyTab)
+
+	press(&m, "n") // Ideas, in the body
+	press(&m, "n") // Plan, in the footer
+	if m.linkIdx != 1 || !strings.Contains(m.status, "link 2/2: linked from Plan (page/plan)") {
+		t.Fatalf("idx %d status %q", m.linkIdx, m.status)
+	}
+	if v := ansi.Strip(m.view.View()); !strings.Contains(v, "▶Plan◀") {
+		t.Fatalf("footer entry not highlighted:\n%s", v)
+	}
+	press(&m, "n") // wraps
+	if m.linkIdx != 0 {
+		t.Fatalf("n should wrap to 0, at %d", m.linkIdx)
+	}
+	press(&m, "N")
+	keyMsg(&m, tea.KeyEnter)
+	if n := m.selected(); n == nil || n.ID != "plan" || m.linkIdx != -1 {
+		t.Fatalf("enter should open plan, at %v (link %d)", m.selected(), m.linkIdx)
+	}
+	press(&m, "b")
+	if n := m.selected(); n == nil || n.ID != "groceries" {
+		t.Fatalf("b should return to groceries, at %v", m.selected())
+	}
+}

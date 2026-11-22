@@ -14,7 +14,8 @@ import (
 )
 
 // Following links from the focused preview: n / N highlight the next or
-// previous link in the rendered note, enter opens it, backspace goes back.
+// previous link in the rendered note, then the notes in its "Linked from"
+// footer, enter opens it, backspace goes back.
 //
 // glamour renders the Markdown, so where a link lands on screen isn't
 // known. Instead the selected link's text is wrapped in two private-use
@@ -42,6 +43,18 @@ func (m *model) syncLinks(n *notes.Note) {
 	m.linksKey, m.bodyLinks, m.linkIdx = key, nil, -1
 	if full, err := m.app.Store.Get(n.Kind, n.ID); err == nil {
 		m.bodyLinks = notes.BodyLinks(full)
+	}
+}
+
+// syncLinkedBy refreshes linkedBy, the notes linking to n (read on every
+// preview update, since a change to another note can alter them).
+func (m *model) syncLinkedBy(n *notes.Note) {
+	m.linkedBy = nil
+	if bl, err := m.app.Store.Backlinks(n.Kind, n.ID); err == nil {
+		m.linkedBy = bl
+	}
+	if m.linkIdx >= len(m.bodyLinks)+len(m.linkedBy) {
+		m.linkIdx = -1
 	}
 }
 
@@ -129,7 +142,7 @@ func (m *model) scrollToLine(line int) {
 
 // cycleLink highlights the next (d = 1) or previous (d = -1) link.
 func (m *model) cycleLink(d int) {
-	n := len(m.bodyLinks)
+	n := len(m.bodyLinks) + len(m.linkedBy)
 	if n == 0 {
 		m.setStatus("no links in this note")
 		return
@@ -142,6 +155,12 @@ func (m *model) cycleLink(d int) {
 		}
 	} else {
 		m.linkIdx = (m.linkIdx + d + n) % n
+	}
+	if i := m.linkIdx - len(m.bodyLinks); i >= 0 {
+		x := m.linkedBy[i].Note
+		m.setStatus(fmt.Sprintf("link %d/%d: linked from %s (%s) · enter opens", m.linkIdx+1, n, x.Title, x.Key()))
+		m.updatePreview()
+		return
 	}
 	l := m.bodyLinks[m.linkIdx]
 	to := l.Dest
@@ -156,11 +175,23 @@ func (m *model) cycleLink(d int) {
 // missing one created and opened in the editor), anything else opens in
 // the system's default app.
 func (m *model) openSelectedLink() tea.Cmd {
+	from := m.selected()
+	if i := m.linkIdx - len(m.bodyLinks); i >= 0 && i < len(m.linkedBy) {
+		n, err := m.app.Store.Get(m.linkedBy[i].Note.Kind, m.linkedBy[i].Note.ID)
+		if err != nil {
+			m.setErr(err)
+			return nil
+		}
+		m.pushBack(from)
+		m.touchRecent(n)
+		m.showNote(n)
+		m.setStatus("opened " + n.Key() + " (b back)")
+		return nil
+	}
 	if m.linkIdx < 0 || m.linkIdx >= len(m.bodyLinks) {
 		return nil
 	}
 	l := m.bodyLinks[m.linkIdx]
-	from := m.selected()
 	if !l.Note {
 		target := l.Dest
 		if !strings.Contains(target, ":") && from != nil {
@@ -181,12 +212,7 @@ func (m *model) openSelectedLink() tea.Cmd {
 			return nil
 		}
 	}
-	if from != nil {
-		m.back = append(m.back, from.Key())
-		if len(m.back) > maxBack {
-			m.back = m.back[1:]
-		}
-	}
+	m.pushBack(from)
 	m.touchRecent(n)
 	m.showNote(n)
 	if created {
@@ -195,6 +221,17 @@ func (m *model) openSelectedLink() tea.Cmd {
 	}
 	m.setStatus("opened " + n.Key() + " (b back)")
 	return nil
+}
+
+// pushBack remembers from (if any) for b / backspace.
+func (m *model) pushBack(from *notes.Note) {
+	if from == nil {
+		return
+	}
+	m.back = append(m.back, from.Key())
+	if len(m.back) > maxBack {
+		m.back = m.back[1:]
+	}
 }
 
 // goBack shows the note a link was followed from.

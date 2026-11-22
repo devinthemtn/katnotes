@@ -390,7 +390,8 @@ type model struct {
 	focusPreview bool // tab: keys scroll the preview instead of moving in the list
 
 	bodyLinks []notes.BodyLink // the previewed note's links (n / N cycle them)
-	linkIdx   int              // highlighted link, or -1
+	linkedBy  []notes.Backlink // notes linking to it, cycled after bodyLinks
+	linkIdx   int              // highlighted link (bodyLinks then linkedBy), or -1
 	linksKey  string           // note (and version) bodyLinks was read from
 	back      []string         // notes left by following links (backspace)
 
@@ -608,22 +609,34 @@ func (m *model) linkItems() ([]list.Item, error) {
 	return items, err
 }
 
-// linkedFrom is the preview footer listing the notes that link to n.
-func (m *model) linkedFrom(n *notes.Note) string {
-	bl, err := m.app.Store.Backlinks(n.Kind, n.ID)
-	if err != nil || len(bl) == 0 {
-		return ""
+// linkedFrom is the preview footer listing the notes that link to the
+// previewed note (m.linkedBy). It also returns the footer line of the one
+// n / N highlighted, or -1.
+func (m *model) linkedFrom() (string, int) {
+	bl := m.linkedBy
+	if len(bl) == 0 {
+		return "", -1
 	}
+	sel, line := m.linkIdx-len(m.bodyLinks), -1
 	var b strings.Builder
 	b.WriteString("\n" + filterStyle.Render(fmt.Sprintf("  Linked from (%d)", len(bl))) + statusStyle.Render("  · gb lists them") + "\n")
-	for _, x := range bl {
-		line := notes.PlainLinks(x.Lines[0].Text)
-		if r := []rune(line); len(r) > 60 {
-			line = string(r[:59]) + "…"
+	for i, x := range bl {
+		text := ""
+		if len(x.Lines) > 0 {
+			text = notes.PlainLinks(x.Lines[0].Text)
 		}
-		fmt.Fprintf(&b, "  • %s %s\n", x.Note.Title, statusStyle.Render(line))
+		if r := []rune(text); len(r) > 60 {
+			text = string(r[:59]) + "…"
+		}
+		title := x.Note.Title
+		if i == sel {
+			line = i + 2
+			mark := lipgloss.NewStyle().Bold(true).Foreground(accentColor)
+			title = mark.Render("▶") + title + mark.Render("◀")
+		}
+		fmt.Fprintf(&b, "  • %s %s\n", title, statusStyle.Render(text))
 	}
-	return b.String()
+	return b.String(), line
 }
 
 // selectKey moves the cursor to the note with key k, if listed.
@@ -750,6 +763,7 @@ func (m *model) updatePreview() {
 		content = out
 	} else if n := m.selected(); n != nil {
 		m.syncLinks(n)
+		m.syncLinkedBy(n)
 		k = n.Path + n.Updated.String()
 		if m.linkIdx >= 0 {
 			k += fmt.Sprintf("#link%d", m.linkIdx)
@@ -760,8 +774,12 @@ func (m *model) updatePreview() {
 		if m.linkIdx >= 0 {
 			// A highlighted link: rendered afresh (not cached) and scrolled to.
 			out, line := m.renderWithLink(n)
+			foot, fline := m.linkedFrom()
+			if fline >= 0 {
+				line = strings.Count(out, "\n") + fline
+			}
 			m.preview = k
-			m.view.SetContent(out + m.linkedFrom(n))
+			m.view.SetContent(out + foot)
 			m.scrollToLine(line)
 			return
 		}
@@ -781,7 +799,8 @@ func (m *model) updatePreview() {
 			}
 			m.cache[k] = out
 		}
-		content = out + m.linkedFrom(n)
+		foot, _ := m.linkedFrom()
+		content = out + foot
 	} else if it, ok := m.list.SelectedItem().(missingItem); ok {
 		k = "missing:" + notes.Key(it.l.Kind, it.l.ID)
 		content = statusStyle.Render(fmt.Sprintf("\n  %s/%s doesn't exist yet.\n\n  enter: create it and open it in your editor", it.l.Kind, it.l.ID))
@@ -1601,8 +1620,8 @@ func (m model) View() string {
 	body := titledBox(list, m.list.Width()+1, m.list.Height(), listC, m.listTitle(), m.listPosition())
 	if m.showPreview() {
 		footer := ""
-		if m.linkIdx >= 0 && len(m.bodyLinks) > 0 {
-			footer = fmt.Sprintf("link %d/%d", m.linkIdx+1, len(m.bodyLinks))
+		if total := len(m.bodyLinks) + len(m.linkedBy); m.linkIdx >= 0 && total > 0 {
+			footer = fmt.Sprintf("link %d/%d", m.linkIdx+1, total)
 		}
 		if m.view.TotalLineCount() > m.view.Height {
 			if footer != "" {
@@ -1753,7 +1772,7 @@ var helpSections = []helpSec{
 		{"ctrl+d / ctrl+u", "half a page down / up the list"},
 		{"ctrl+f / ctrl+b", "next / previous page of the list"},
 		{"tab", "focus the preview: j/k, ctrl+d/u, space, gg/G scroll it; tab or esc goes back"},
-		{"n / N", "focused preview: highlight the next / previous link"},
+		{"n / N", "focused preview: highlight the next / previous link (then the notes linking here)"},
 		{"enter", "focused preview: open the highlighted link (note: show it · missing: create it · URL: browser)"},
 		{"b / backspace", "back to the note you followed a link from (b: in the focused preview)"},
 		{"l  →  gt", "next tab"},
