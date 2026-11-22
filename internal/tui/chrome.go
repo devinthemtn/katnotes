@@ -15,6 +15,9 @@ var (
 	accentColor = lipgloss.Color("#7D56F4")
 	borderColor = lipgloss.Color("238")
 	dangerColor = lipgloss.Color("#F7768E")
+	// {{ … }} in the preview (highlight.go).
+	highlightColor = lipgloss.Color("#18181F")
+	highlightBg    = lipgloss.Color("#E0AF68")
 
 	tagStyle     = lipgloss.NewStyle().Foreground(accentColor)
 	doneStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Strikethrough(true)

@@ -13,6 +13,8 @@
   --heading: #7d56f4;
   --warning: #c08a1e;
   --info: #3d6fd8;
+  --highlight: #24232a;
+  --highlight-bg: #fbe38e;
   --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --mono: ui-monospace, "JetBrains Mono", "Fira Code", Menlo, monospace;
   --size: 14px;
@@ -34,6 +36,8 @@
     --heading: #9d7df8;
     --warning: #e0af68;
     --info: #7aa2f7;
+    --highlight: #18181f;
+    --highlight-bg: #e0af68;
     color-scheme: dark;
   }
 }
@@ -180,6 +184,7 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); }
 .preview pre code { background: none; padding: 0; }
 .preview blockquote { border-left: 3px solid var(--accent); margin: 0; padding: 2px 14px; color: var(--muted); }
 .preview a { color: var(--accent); }
+.preview mark.hl { background: var(--highlight-bg); color: var(--highlight); padding: 0 2px; border-radius: 3px; }
 .preview table { border-collapse: collapse; }
 .preview th, .preview td { border: 1px solid var(--border); padding: 4px 10px; }
 .preview img { max-width: 100%; }

@@ -12,7 +12,7 @@ import (
 
 // Colour themes (internal/theme), shared with the GUI. The TUI draws on the
 // terminal's own background and text colour and takes the rest from the
-// theme: accent, muted, border, heading, danger, warning, info.
+// theme: accent, muted, border, heading, danger, warning, info, highlight.
 
 var (
 	// curTheme is the theme the styles were last set from.
@@ -57,6 +57,7 @@ func applyTheme(t theme.Theme) {
 	fmKey = lipgloss.NewStyle().Foreground(c("muted")).Width(10)
 
 	accentColor, borderColor, dangerColor = c("accent"), c("border"), c("danger")
+	highlightColor, highlightBg = c("highlight"), c("highlight_bg")
 	tagStyle = lipgloss.NewStyle().Foreground(c("accent"))
 	doneStyle = lipgloss.NewStyle().Foreground(c("muted")).Strikethrough(true)
 	badgeOverdue = lipgloss.NewStyle().Foreground(c("danger")).Reverse(true).Padding(0, 1)

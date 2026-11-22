@@ -89,6 +89,8 @@ heading = "#2ec4b6"
 
 `theme = "auto"` uses the themes named `light` and `dark`, following the system setting in the GUI and the terminal background in the TUI. Both apps use `theme` unless `tui_theme` or `gui_theme` gives one its own. `:theme <name>` sets the theme of the app you type it in (its `tui_theme` / `gui_theme`), and `:theme shared` clears that so the app follows `theme` again. You can also use `katnotes config set theme <name>` (or `tui_theme` / `gui_theme`), or the shared, GUI and TUI pickers in the GUI's Settings. The GUI re-reads theme files when its window regains focus, so edits show straight away; the TUI applies them on `:theme` or the next start. A theme file with a mistake still loads (bad values keep the built-in colour) and the app says what's wrong. The TUI uses the theme's accent, muted, border, heading and status colours, and keeps your terminal's own background and text colours.
 
+Text inside `{{ }}` in a note, such as `{{follow up with Sam}}`, is highlighted in the preview of both apps (not inside code): `highlight` is its text colour and `highlight_bg` the background behind it. Theme files written before these existed simply use the built-in colours until you add them.
+
 ## Finding notes
 
 Both apps have the same search with three modes. In the TUI, `/` opens a live search bar and Tab switches the mode. In the GUI, use the Name / Tags / Text buttons over the search box, or press Tab in the box.

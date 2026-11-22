@@ -792,7 +792,7 @@ func (m *model) updatePreview() {
 				out = full.Body
 				if m.render != nil {
 					if r, err := m.render.Render(previewBody(full.Body, notes.BodyLinks(full), -1)); err == nil {
-						out = r
+						out = applyHighlights(r)
 					}
 				}
 				out = m.frontmatterView(full) + out

@@ -69,6 +69,8 @@ var Keys = []Key{
 	{"warning", "unsaved, filters, medium priority"},
 	{"info", "TUI low-priority tasks"},
 	{"code_bg", "GUI code blocks and inline code"},
+	{"highlight", "text inside {{ }} in notes"},
+	{"highlight_bg", "background behind {{ }} in notes"},
 }
 
 var builtin = map[string]map[string]string{
@@ -76,13 +78,13 @@ var builtin = map[string]map[string]string{
 		"bg": "#f7f6f3", "panel": "#ffffff", "sidebar": "#efede8", "text": "#24232a",
 		"muted": "#76737e", "border": "#dedad2", "accent": "#7d56f4", "accent_text": "#ffffff",
 		"accent_soft": "#ece6fe", "heading": "#7d56f4", "danger": "#c43c55", "warning": "#c08a1e",
-		"info": "#3d6fd8", "code_bg": "#f0eee9",
+		"info": "#3d6fd8", "code_bg": "#f0eee9", "highlight": "#24232a", "highlight_bg": "#fbe38e",
 	},
 	Dark: {
 		"bg": "#18181f", "panel": "#1e1e27", "sidebar": "#15151b", "text": "#e3e1ea",
 		"muted": "#8d8a99", "border": "#2e2d39", "accent": "#9d7df8", "accent_text": "#ffffff",
 		"accent_soft": "#2c2547", "heading": "#9d7df8", "danger": "#f7768e", "warning": "#e0af68",
-		"info": "#7aa2f7", "code_bg": "#262531",
+		"info": "#7aa2f7", "code_bg": "#262531", "highlight": "#18181f", "highlight_bg": "#e0af68",
 	},
 }
 

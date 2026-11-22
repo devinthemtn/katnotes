@@ -61,7 +61,8 @@ func (m *model) syncLinkedBy(n *notes.Note) {
 // previewBody is body as the preview renders it. Links to notes point at
 // "#", which glamour shows as their text alone instead of text plus a
 // ../pages/x.md path (web links keep their URL). The link at index sel, if
-// any, has its text wrapped in the sentinel runes. links are body's links.
+// any, has its text wrapped in the sentinel runes, and so does each
+// {{ … }} (markHighlights). links are body's links.
 func previewBody(body string, links []notes.BodyLink, sel int) string {
 	type edit struct {
 		start, end int
@@ -93,7 +94,7 @@ func previewBody(body string, links []notes.BodyLink, sel int) string {
 		}
 		lines[n] = s
 	}
-	return strings.Join(lines, "\n")
+	return markHighlights(strings.Join(lines, "\n"))
 }
 
 // highlightLink swaps the sentinels in rendered text for visible markers
@@ -123,7 +124,7 @@ func (m *model) renderWithLink(n *notes.Note) (string, int) {
 			out = r
 		}
 	}
-	out, line := highlightLink(out)
+	out, line := highlightLink(applyHighlights(out))
 	fm := m.frontmatterView(full)
 	if line >= 0 {
 		line += strings.Count(fm, "\n")

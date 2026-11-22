@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
   import { marked } from 'marked';
+  import { highlightExtension } from './highlight';
   import DOMPurify from 'dompurify';
   import { checkboxHTML, decorateTasks, toggleTask, makeTask, continueList, setTaskLine, setTaskMetaLine, metaChips, setStampDone, dateState, today, ensureMetaBlock } from './tasks';
   import { metaContext, suggest, applySuggestion, shouldPairBrace, type MetaContext, type MetaStat, type Suggestion } from './metacomplete';
@@ -23,7 +24,7 @@
   import type { State as ViewStateT } from '../bindings/github.com/devinthemtn/katnotes/internal/viewstate';
   import type { Completion as CmdCompletion, Result as CmdResult, Choice as CmdChoice, Spec as CmdSpec } from '../bindings/github.com/devinthemtn/katnotes/internal/commands';
 
-  marked.use({ renderer: { checkbox: checkboxHTML } });
+  marked.use({ renderer: { checkbox: checkboxHTML } }, highlightExtension);
 
   type Tab = 'page' | 'journal' | 'tags' | 'tasks';
   type ViewMode = 'edit' | 'split' | 'preview';
