@@ -189,6 +189,15 @@ func (s *NotesService) Backlinks(kind, id string) ([]notes.Backlink, error) {
 	return st.Backlinks(k, id)
 }
 
+// Graph is the link graph: every note, or with center ("kind/id") the notes
+// within depth links of it. tags adds tag nodes, missing adds links to notes
+// that don't exist yet, journal keeps journal entries.
+func (s *NotesService) Graph(center string, depth int, tags, missing, journal bool) (*notes.Graph, error) {
+	st := s.lock()
+	defer s.mu.Unlock()
+	return st.Graph(notes.GraphOpts{Center: center, Depth: depth, Tags: tags, Missing: missing, Journal: journal})
+}
+
 // Delete removes a note.
 func (s *NotesService) Delete(kind, id string) error {
 	st := s.lock()
