@@ -7,6 +7,7 @@
   import { metaContext, suggest, applySuggestion, shouldPairBrace, type MetaContext, type MetaStat, type Suggestion } from './metacomplete';
   import { SLASH, matchSlash, mergeSlash, slashQuery, slashToken, expandSlash, applyUserResult, caretXY, type SlashCommand } from './slash';
   import { linkQuery, linkSuggestions, linkMarkdown, linkText, applyLink, decorateLinks, keyOf, type NoteRef, type LinkSuggestion } from './links';
+  import { rewriteImageSrc, imageFiles, assetName, fileToBase64, imageInsert } from './images';
   import EditorMenu from './EditorMenu.svelte';
   import Backlinks from './components/Backlinks.svelte';
   import NewNoteDialog from './components/NewNoteDialog.svelte';
@@ -225,6 +226,7 @@
       ['Enter', 'In the title field: rename the note'],
       ['/', `In the editor: slash commands (${SLASH.map((c) => c.name).join(', ')})`],
       ['/your-command', 'Lua commands from ~/.config/katnotes/slash/*.lua (:reload after editing)'],
+      ['Paste / drop an image', 'In the editor: copies it into assets/ in the notes folder and inserts ![](../assets/…) (or /image to pick a file)'],
       [`${modLabel}+Enter`, 'In the editor: make the line a task, or check/uncheck it'],
       [`${modLabel}+Shift+K`, 'In the editor: delete the line (or every line in the selection)'],
       ['Enter', 'On a list item or task: continue the list below; on an empty one: remove it'],
@@ -293,11 +295,13 @@
 
 
   let preview = $derived(
-    DOMPurify.sanitize(
-      decorateLinks(
-        decorateTasks(marked.parse(draftBody, { async: false, gfm: true, breaks: false }) as string),
-        (current as Note | null)?.kind ?? 'page',
-        (kind, id) => linkKeys.has(`${kind}/${id}`),
+    rewriteImageSrc(
+      DOMPurify.sanitize(
+        decorateLinks(
+          decorateTasks(marked.parse(draftBody, { async: false, gfm: true, breaks: false }) as string),
+          (current as Note | null)?.kind ?? 'page',
+          (kind, id) => linkKeys.has(`${kind}/${id}`),
+        ),
       ),
     )
   );
@@ -954,6 +958,18 @@
     help: () => { helpOpen = true; },
     delete: () => { if (current) deleteOpen = true; },
     frontmatter: openFrontmatter,
+    image: (r) => {
+      const path = (r.args ?? [])[0]?.trim();
+      if (!path) return pickImage();
+      return insertAssets([async () => {
+        try {
+          return await api.ImportAsset(path);
+        } catch (e) {
+          flash(`image: ${errMsg(e)}`, true);
+          return '';
+        }
+      }]);
+    },
     search: (r) => applySaved({ mode: r.args?.[0] ?? 'name', text: r.args?.[1] ?? '' }),
   };
 
@@ -1725,6 +1741,12 @@
     slashOpen = false;
     const l = caretLine();
     if (!cmd || !l) return;
+    if (cmd.action === 'image') {
+      const r = expandSlash(l.text, l.col, cmd);
+      if (r) await replaceRange(l.start, l.end, r.line, l.start + r.col);
+      pickImage();
+      return;
+    }
     if (!cmd.user) {
       const r = expandSlash(l.text, l.col, cmd);
       if (r) replaceRange(l.start, l.end, r.line, l.start + r.col)?.then(() => { if (cmd.meta) updateMeta(); });
@@ -1756,6 +1778,73 @@
     } catch (e) {
       flash(`/${cmd.name}: ${errMsg(e)}`, true);
     }
+  }
+
+  // Images: copied into <notes>/assets/ by the Go side, then linked at the
+  // caret as ![](../assets/<file>).
+  async function insertImages(files: File[], pasted: boolean) {
+    await insertAssets(files.map((f) => async () => {
+      try {
+        return await api.SaveAsset(assetName(f, pasted), await fileToBase64(f));
+      } catch (e) {
+        flash(`image ${f.name || '(pasted)'}: ${errMsg(e)}`, true);
+        return '';
+      }
+    }));
+  }
+
+  // Each save returns the Markdown for one stored image ('' if it failed).
+  async function insertAssets(saves: (() => Promise<string>)[]) {
+    if (!saves.length || !bodyEl || !current) return;
+    const note = current;
+    const from = bodyEl.selectionStart, to = bodyEl.selectionEnd;
+    const md: string[] = [];
+    for (const save of saves) {
+      const m = await save();
+      if (m) md.push(m);
+    }
+    if (!md.length) return;
+    if (!current || keyOf(current) !== keyOf(note) || !bodyEl) {
+      flash('image saved to assets/, but the note changed before it could be linked', true);
+      return;
+    }
+    const text = imageInsert(bodyEl.value, from, md);
+    await replaceRange(from, to, text, from + text.length);
+    flash(md.length === 1 ? `image saved: ${md[0].slice(md[0].indexOf('](') + 5, -1)}` : `${md.length} images saved to assets/`);
+  }
+
+  function onBodyPaste(e: ClipboardEvent) {
+    const files = imageFiles(e.clipboardData?.files);
+    if (!files.length) return;
+    e.preventDefault();
+    insertImages(files, true);
+  }
+
+  function onBodyDragOver(e: DragEvent) {
+    if (e.dataTransfer?.types.includes('Files')) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+    }
+  }
+
+  function onBodyDrop(e: DragEvent) {
+    const files = imageFiles(e.dataTransfer?.files);
+    if (!files.length) return;
+    e.preventDefault();
+    // Put the caret where the files were dropped, when the webview can say.
+    const d = document as any;
+    const pos = d.caretPositionFromPoint?.(e.clientX, e.clientY)?.offset ?? d.caretRangeFromPoint?.(e.clientX, e.clientY)?.startOffset;
+    if (bodyEl && typeof pos === 'number' && document.activeElement !== bodyEl) {
+      bodyEl.focus();
+      bodyEl.setSelectionRange(pos, pos);
+    }
+    insertImages(files, false);
+  }
+
+  let imagePicker: HTMLInputElement | undefined = $state();
+  function pickImage() {
+    if (!current) { flash('image: open a note first', true); return; }
+    imagePicker?.click();
   }
 
   // Keys while the slash menu is open. Returns true when handled.
@@ -2146,12 +2235,17 @@
             bind:value={draftBody}
             oninput={() => { onEdit(); updateSlash(); updateLink(); updateMeta(); }}
             onkeydown={onBodyKey}
+            onpaste={onBodyPaste}
+            ondragover={onBodyDragOver}
+            ondrop={onBodyDrop}
             onkeyup={(e) => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) { updateSlash(); updateLink(); updateMeta(); } }}
             onclick={() => { updateSlash(); updateLink(); updateMeta(); }}
             onblur={closeMenus}
             onscroll={() => { if (slashOpen) updateSlash(); if (linkOpen) updateLink(); if (metaOpen) updateMeta(); }}
             spellcheck="true"
           ></textarea>
+          <input type="file" accept="image/*" multiple hidden bind:this={imagePicker}
+            onchange={(e) => { const el = e.currentTarget; const fs = imageFiles(el.files); el.value = ''; bodyEl?.focus(); insertImages(fs, false); }} />
           {#if slashOpen && slashItems.length}
             <EditorMenu
               items={slashItems.map((c) => ({ key: c.name, label: '/' + c.name, detail: c.desc(), badge: c.user ? 'lua' : undefined }))}

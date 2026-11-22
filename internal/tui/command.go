@@ -64,7 +64,8 @@ var tuiActions = map[string]func(m *model, r commands.Result) tea.Cmd{
 		m.openHelp()
 		return nil
 	},
-	"quit": func(m *model, _ commands.Result) tea.Cmd { return tea.Quit },
+	"quit":  func(m *model, _ commands.Result) tea.Cmd { return tea.Quit },
+	"image": imageAction,
 	"search": func(m *model, r commands.Result) tea.Cmd {
 		if len(r.Args) == 2 {
 			m.applySearch(r.Args[0], r.Args[1])

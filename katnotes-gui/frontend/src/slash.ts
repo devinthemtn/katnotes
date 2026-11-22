@@ -11,6 +11,8 @@ export type SlashCommand = {
   user?: boolean;
   // Task metadata key: make the line a task and move into its {key:…} block.
   meta?: string;
+  // App action run after the token is removed (image: pick a file to insert).
+  action?: 'image';
 };
 
 // What a user Lua command returned (mirrors luacmd.Result).
@@ -35,6 +37,7 @@ export const SLASH: SlashCommand[] = [
   { name: 'tomorrow', desc: () => isoDate(1), text: () => isoDate(1) },
   { name: 'yesterday', desc: () => isoDate(-1), text: () => isoDate(-1) },
   { name: 'time', desc: () => timeNow(), text: () => timeNow() },
+  { name: 'image', desc: () => 'Insert an image file (or paste / drop one)', action: 'image' },
 ];
 
 // The partial command name being typed, if the text before the cursor ends
@@ -96,6 +99,7 @@ export function expandSlash(line: string, col: number, cmd: SlashCommand): { lin
   const q = slashQuery(line.slice(0, col));
   if (q === null) return null;
   const start = col - q.length - 1;
+  if (cmd.action) return { line: line.slice(0, start) + line.slice(col), col: start };
   if (cmd.meta) {
     // Drop the token (and the space it leaves), then open the metadata block.
     let rest = line.slice(0, start) + line.slice(col);

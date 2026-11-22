@@ -76,6 +76,7 @@ const (
 	modeHelp
 	modeCommand
 	modeSearch // the live "/" search bar
+	modeImage  // :image file picker
 )
 
 type inputPurpose int
@@ -357,6 +358,8 @@ type model struct {
 	cmdHistIdx  int                 // position while browsing history with ↑, or -1
 	cmdHistPath string              // shared history file ("" disables saving)
 	fmDrafts    map[string]string   // note key -> ":frontmatter" text that failed to apply
+	img         *imagePicker        // :image file picker, while open
+	imgDir      string              // folder the last image was picked from
 
 	tagFilter   string
 	query       string
@@ -985,6 +988,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateCommand(msg)
 		case modeSearch:
 			return m.updateSearch(msg)
+		case modeImage:
+			return m.updateImage(msg)
 		}
 		return m.updateNormal(msg)
 	}
@@ -1648,6 +1653,8 @@ func (m model) View() string {
 	case modeConfirm:
 		what := fmt.Sprintf("%s\n%s", m.confirm.Title, statusStyle.Render(m.confirm.Key()))
 		body = overlayCenter(body, modal("Delete this note?", what, "y delete · any other key cancels", m.dialogWidth(), dangerColor), m.width)
+	case modeImage:
+		body = overlayCenter(body, m.imagePickerView(), m.width)
 	}
 	switch m.mode {
 	case modeCommand, modeSearch:

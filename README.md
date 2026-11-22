@@ -1,5 +1,6 @@
 # KatNotes
 
+
 Personal notes in plain Markdown with YAML frontmatter. KatNotes has one Go core and three ways to use it:
 
 - **`katnotes`** is a CLI and, run with no arguments, a TUI (Bubble Tea). It is a pure Go build with no CGO.
@@ -21,6 +22,7 @@ The installer isn't code-signed yet, so Windows warns you before running it:
 | What | Where |
 |---|---|
 | Notes | `~/KatNotes/pages/<slug>.md` and `~/KatNotes/journal/YYYY-MM-DD.md` |
+| Images | `~/KatNotes/assets/<file>`, linked from notes as `![](../assets/<file>)` |
 | Options | `$XDG_CONFIG_HOME/katnotes/config.toml` (usually `~/.config/katnotes/config.toml`) |
 | Lua `/` commands (GUI editor) | `~/.config/katnotes/slash/<name>.lua` |
 | Lua `:` commands (TUI and GUI command window) | `~/.config/katnotes/commands/<name>.lua` |
@@ -173,6 +175,18 @@ The graph shows notes and the links between them: either every note, or only the
 - **TUI:** `gn` (or `:graph`) lists the notes around the selected one, nearest first, and the preview draws its neighbourhood as a tree (`→` links to, `←` linked from). `+` / `-` change the depth. `:graph all` lists every note, most linked first.
 - **CLI:** `katnotes graph [id]` prints one edge per line. `--format dot` gives Graphviz, e.g. `katnotes graph --tags --format dot | dot -Tsvg > graph.svg`, and `--json` (or `--format json`) gives the nodes and edges.
 
+## Images
+
+Images live in `assets/` in the notes folder, next to `pages/` and `journal/`, and notes link to them with ordinary Markdown, `![alt](../assets/cat.png)`, so Obsidian, VS Code, GitHub and other Markdown tools show them too. Git sync commits them along with the notes.
+
+- **GUI:** paste an image (a screenshot, say) or drop image files into the editor, or type `/image` (or `:image` in the command window) to pick one. The file is copied into `assets/` and the link is put at the caret. The preview shows it.
+- **CLI:** `katnotes attach <file>` copies a file in and prints the Markdown; `katnotes attach <file> <note>` adds it to the end of that note instead (`--alt` sets the alt text).
+- **TUI:** `:image` opens a file picker on the selected note. It lists folders and image files, and you can type to filter, type a path (`~/Downloads/cat.png`), or press Tab to go into a folder and Backspace to go up. Enter adds the image to the end of the note. `:image <path>` skips the picker. The preview shows an image as its alt text and path.
+
+Names come from the original file name, slugified (`Cat Photo.PNG` becomes `cat-photo.png`), with `-2`, `-3`… added if the name is taken. A pasted image is named `pasted-<date>-<time>.png`. If a file with the same contents is already in `assets/`, it is reused instead of copied again. PNG, JPEG, GIF, WebP, SVG, AVIF and BMP files up to 25 MB are accepted.
+
+Deleting or renaming a note leaves its images alone, since other notes may use them too. `katnotes assets orphans` lists the files no note mentions, and `--delete` removes them.
+
 ## CLI
 
 ```
@@ -209,6 +223,8 @@ katnotes backlinks <id>        # notes that link here, with the lines
 katnotes wikilinks <id> [--move]   # turn [[page]] text into links, creating missing pages
 katnotes run [command] [args…] [--note <id>]   # run one of your Lua : commands (no command: list them)
 katnotes graph [id] [--depth N] [--tags] [--missing] [--no-journal] [--format text|dot|json]   # the link graph (with an id: around that note)
+katnotes attach <file> [id] [--alt text]   # copy an image into assets/; print its Markdown, or add it to the note
+katnotes assets ls|orphans [--delete]      # files in assets/; orphans: ones no note refers to
 katnotes config path|show|edit|set
 ```
 

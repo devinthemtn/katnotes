@@ -255,6 +255,9 @@ func init() {
 		{Name: "wikilinks", Desc: "Turn [[page]] text into links to pages, creating missing ones (move: also move the lines indented under it there)", NeedsNote: true, Args: []Arg{
 			{Name: "move", Kind: ArgChoice, Optional: true, Choices: []string{"move"}},
 		}, run: runWikiLinks},
+		{Name: "image", Desc: "Attach an image (copied into assets/); no path opens a file picker (GUI: inserts at the caret)", NeedsNote: true, UI: true, Apps: []string{AppTUI, AppGUI}, Args: []Arg{
+			{Name: "path", Kind: ArgText, Rest: true, Optional: true},
+		}},
 		{Name: "links", Desc: "Notes this note links to", NeedsNote: true, run: runLinks},
 		{Name: "backlinks", Desc: "Notes that link to this note", NeedsNote: true, run: runBacklinks},
 		{Name: "graph", Desc: "Show the link graph: all notes, or local (around this note)", UI: true, Apps: []string{AppTUI, AppGUI}, Args: []Arg{

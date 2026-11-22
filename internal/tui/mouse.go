@@ -53,7 +53,7 @@ func (m model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case modeCommand:
 		return m.mouseCommand(msg, wheel, up)
-	case modeInput, modeConfirm:
+	case modeInput, modeConfirm, modeImage:
 		// A stray click mustn't cancel typing or answer the delete question.
 		return m, nil
 	}

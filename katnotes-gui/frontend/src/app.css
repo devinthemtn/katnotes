@@ -187,7 +187,7 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); }
 .preview mark.hl { background: var(--highlight-bg); color: var(--highlight); padding: 0 2px; border-radius: 3px; }
 .preview table { border-collapse: collapse; }
 .preview th, .preview td { border: 1px solid var(--border); padding: 4px 10px; }
-.preview img { max-width: 100%; }
+.preview img { max-width: 100%; height: auto; border-radius: 4px; }
 
 .welcome { margin: auto; text-align: center; color: var(--muted); }
 .welcome h1 { color: var(--text); margin-bottom: 4px; }
