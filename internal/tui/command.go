@@ -16,6 +16,7 @@ import (
 	"github.com/devinthemtn/katnotes/internal/commands"
 	"github.com/devinthemtn/katnotes/internal/config"
 	"github.com/devinthemtn/katnotes/internal/editor"
+	"github.com/devinthemtn/katnotes/internal/notes"
 )
 
 // The ":" command window. Commands, their arguments and completion come from
@@ -74,6 +75,14 @@ var tuiActions = map[string]func(m *model, r commands.Result) tea.Cmd{
 		if n := m.selected(); n != nil {
 			m.openLinks(n, false)
 		}
+		return nil
+	},
+	"graph": func(m *model, r commands.Result) tea.Cmd {
+		var n *notes.Note
+		if len(r.Args) == 0 || r.Args[0] != "all" {
+			n = m.selected()
+		}
+		m.openGraph(n)
 		return nil
 	},
 	"backlinks": func(m *model, _ commands.Result) tea.Cmd {

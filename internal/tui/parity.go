@@ -27,11 +27,13 @@ type pickView struct {
 func (m *model) clearViews() {
 	m.links = nil
 	m.pick = nil
+	m.graph = nil
 }
 
 // showPick switches the list to a command's pick list.
 func (m *model) showPick(title string, items []commands.Choice) {
 	m.links = nil
+	m.graph = nil
 	m.pick = &pickView{title: title, items: items}
 	m.list.Select(0)
 	m.reload()
