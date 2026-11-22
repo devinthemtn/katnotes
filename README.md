@@ -399,6 +399,7 @@ You need Go 1.26+ and [go-task](https://taskfile.dev). The GUI also needs `wails
 task build        # bin/katnotes
 task build-gui    # katnotes-gui/bin/katnotes-gui
 task dev-gui      # GUI with hot reload
+task dev-tui      # TUI from source; args after --, e.g. task dev-tui -- --dir /tmp/notes
 task test         # go test -tags gtk3 ./... and the frontend unit tests (npm test)
 task install      # both binaries into $GOPATH/bin; in WSL, the Windows versions too
 task build-windows    # bin/katnotes.exe and katnotes-gui/bin/katnotes-gui.exe
