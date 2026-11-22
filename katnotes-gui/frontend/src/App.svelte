@@ -13,6 +13,7 @@
   import FrontmatterDialog from './components/FrontmatterDialog.svelte';
   import HelpDialog from './components/HelpDialog.svelte';
   import SettingsDialog from './components/SettingsDialog.svelte';
+  import GraphView from './components/GraphView.svelte';
   // The app icon (build/appicon.svg), shown in the help window.
   import { Browser, Clipboard } from '@wailsio/runtime';
   import { NotesService as api } from '../bindings/github.com/devinthemtn/katnotes/katnotes-gui';
@@ -32,7 +33,7 @@
   let tags: TagCount[] = $state([]);
   // Notes that contain tasks (Tasks tab and the all-tasks view).
   let taskNotes: NoteTasks[] = $state([]);
-  let mainView: 'note' | 'tasks' = $state('note');
+  let mainView: 'note' | 'tasks' | 'graph' = $state('note');
   let taskFilter = $state(loadPref('taskFilter', 'open') as 'open' | 'done' | 'all');
   let taskQuery = $state('');
   // All-tasks view: group by note or one list sorted by due date, and a date filter.
@@ -248,6 +249,7 @@
       [`${modLabel}+= / ${modLabel}+-`, 'Make text larger / smaller'],
       [`${modLabel}+0`, 'Reset text size'],
       [`${modLabel}+Shift+T`, 'All tasks from every note (Esc to go back)'],
+      [`${modLabel}+Shift+M`, 'Graph of the links between notes: all, or around this note (Esc to go back)'],
       [`${modLabel}+Shift+O`, 'Open the note in the default app (Settings: open with)'],
       [`${modLabel}+Shift+P / :`, 'Command palette (: outside text fields; also Ctrl+Shift+:)'],
       [`${modLabel}+Shift+Z`, 'Zoom: hide the sidebar and top bar (again to exit)'],
@@ -943,6 +945,10 @@
       }
       return showTasks();
     },
+    graph: (r) => {
+      const a = (r.args ?? [])[0]?.toLowerCase();
+      return showGraph(a === 'local' ? 'local' : a === 'all' ? 'all' : undefined);
+    },
     reload: reloadConfig,
     help: () => { helpOpen = true; },
     delete: () => { if (current) deleteOpen = true; },
@@ -1294,6 +1300,33 @@
     else showTasks();
   }
 
+  // Graph view: every note, or the ones around the open note.
+  let graphScope: 'all' | 'local' = $state(loadPref('graph.scope', 'all') === 'local' ? 'local' : 'all');
+
+  async function showGraph(scope?: 'all' | 'local') {
+    closeMenus();
+    await flushSave();
+    if (scope) graphScope = scope;
+    mainView = 'graph';
+  }
+
+  function toggleGraphView() {
+    if (mainView === 'graph') mainView = 'note';
+    else showGraph();
+  }
+
+  async function graphMissing(kind: string, id: string, title: string) {
+    try {
+      await api.EnsureNote(kind, id, title);
+      flash(`created ${kind}/${id}`);
+      await loadLinkTargets();
+      await refreshList();
+      await open(kind, id);
+    } catch (e) {
+      flash(errMsg(e), true);
+    }
+  }
+
   function recount(nt: NoteTasks) {
     const ts = nt.tasks ?? [];
     nt.done = ts.filter((t) => t.done).length;
@@ -1382,7 +1415,7 @@
       if (newOpen || deleteOpen || settingsOpen || helpOpen || cmdOpen || fmEditOpen) {
         newOpen = deleteOpen = settingsOpen = helpOpen = cmdOpen = fmEditOpen = false;
         e.preventDefault();
-      } else if (mainView === 'tasks') {
+      } else if (mainView === 'tasks' || mainView === 'graph') {
         mainView = 'note';
         e.preventDefault();
       }
@@ -1434,6 +1467,11 @@
       if (k === 'l') {
         e.preventDefault();
         openLinkPicker();
+        return;
+      }
+      if (k === 'm') {
+        e.preventDefault();
+        toggleGraphView();
         return;
       }
       if (k === 'g') {
@@ -1866,6 +1904,7 @@
     {#if tab === 'page' || tab === 'journal'}
       <div class="list-bar">
         <span class="hint">{query.trim() ? `${items.length} of ${totalCount}` : `${items.length} note${items.length === 1 ? '' : 's'}`}</span>
+        <button class="graph-btn" class:active={mainView === 'graph'} onclick={toggleGraphView} title="Graph of links ({modLabel}+Shift+M)">◎ Graph</button>
         <label class="sort-pick">Sort
           <select value={sortFor(tab)} onchange={(e) => setSort(tab, (e.currentTarget as HTMLSelectElement).value)}>
             {#each SORTS[tab] as [v, label] (v)}<option value={v}>{label}</option>{/each}
@@ -1966,7 +2005,16 @@
   {/if}
 
   <main class="main">
-    {#if mainView === 'tasks'}
+    {#if mainView === 'graph'}
+      <GraphView
+        current={current ? keyOf(current) : null}
+        bind:scope={graphScope}
+        onopen={(k, id) => open(k, id)}
+        onmissing={graphMissing}
+        ontag={(t) => { mainView = 'note'; pickTag(t); }}
+        onclose={() => (mainView = 'note')}
+      />
+    {:else if mainView === 'tasks'}
       <section class="tasks-view">
         <header class="tasks-head">
           <h2>Tasks <span class="tasks-total">{taskCount}</span></h2>
@@ -2136,8 +2184,9 @@
           <button class="primary" onclick={openNew}>New page</button>
           <button onclick={openToday}>Today's journal</button>
           <button onclick={showTasks}>Tasks</button>
+          <button onclick={() => showGraph('all')}>Graph</button>
         </div>
-        <p class="keys">{modLabel}+N new · {modLabel}+J today · {modLabel}+K search · {modLabel}+E edit/split/preview · {modLabel}+Shift+P commands · {modLabel}+Shift+T tasks · ? help</p>
+        <p class="keys">{modLabel}+N new · {modLabel}+J today · {modLabel}+K search · {modLabel}+E edit/split/preview · {modLabel}+Shift+P commands · {modLabel}+Shift+T tasks · {modLabel}+Shift+M graph · ? help</p>
       </div>
     {/if}
     {#if zoomed}

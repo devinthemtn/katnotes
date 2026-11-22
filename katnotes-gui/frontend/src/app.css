@@ -416,6 +416,8 @@ kbd {
 /* tasks across notes */
 .all-tasks { width: 100%; text-align: left; }
 .all-tasks.active { border-color: var(--accent); color: var(--accent); }
+.graph-btn { font-size: 12px; padding: 2px 8px; margin-left: auto; margin-right: 8px; }
+.graph-btn.active { border-color: var(--accent); color: var(--accent); }
 .task-count { color: var(--accent); }
 .task-count.none-open { color: var(--muted); }
 .tasks-view { flex: 1; display: flex; flex-direction: column; min-height: 0; }
