@@ -229,6 +229,9 @@ func TestRunNoteActions(t *testing.T) {
 	if r := run("open-with code --wait &"); r.UI != "open-with" || !reflect.DeepEqual(r.Args, []string{"code --wait &"}) {
 		t.Fatalf("open-with: %+v", r)
 	}
+	if r := run("graph local"); r.UI != "graph" || !reflect.DeepEqual(r.Args, []string{"local"}) {
+		t.Fatalf("graph: %+v", r)
+	}
 	if r := run("delete"); r.UI != "delete" || r.Changed {
 		t.Fatalf("delete should be handed to the UI: %+v", r)
 	}
