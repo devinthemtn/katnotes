@@ -74,7 +74,7 @@ type Context struct {
 	NotesDir  string   `json:"notes_dir"`
 	ConfigDir string   `json:"config_dir"`
 	Source    string   `json:"source"` // SourceSlash or SourceCommand ("" counts as slash)
-	App       string   `json:"app"`    // "tui" or "gui"
+	App       string   `json:"app"`    // "tui", "gui" or "cli"
 	Args      string   `json:"args"`   // command window: the text after the name
 }
 
@@ -370,7 +370,7 @@ const CommandExample = `-- KatNotes ":" command example.
 --   long = true      run in the background, like :sync
 -- ctx has:
 --   ctx.args        the text typed after the name ("" if none)
---   ctx.app         "tui" or "gui"
+--   ctx.app         "tui", "gui" or "cli" (katnotes run)
 --   ctx.body        the selected / open note (Markdown, without frontmatter),
 --   ctx.note          { kind, id, title, tags = {…}, path }, or "" and {} fields
 --   ctx.notes_dir   the notes folder

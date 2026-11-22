@@ -107,3 +107,20 @@ func firstNonEmpty(ss ...string) string {
 	}
 	return ""
 }
+
+// LuaCommands lists the user's ":" Lua commands (as in Catalog), for the
+// CLI's `katnotes run`.
+func LuaCommands() []*Spec { return luaSpecs() }
+
+// ExecLua runs the user's Lua command name with args, as the command window
+// would. A built-in with that name isn't a Lua command, so it isn't found.
+func ExecLua(env *Env, name string, args []string) (Result, error) {
+	for _, s := range luaSpecs() {
+		if s.Name == name {
+			r, err := s.run(env, args)
+			r.Command = s.Name
+			return r, err
+		}
+	}
+	return Result{}, fmt.Errorf("no Lua command %q (see %s)", name, LuaDir())
+}

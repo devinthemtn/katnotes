@@ -205,6 +205,7 @@ katnotes tasks set page/<id>:<line> due tomorrow   # set {due:…}; no value rem
 katnotes links <id>            # notes this note links to (marks missing ones)
 katnotes backlinks <id>        # notes that link here, with the lines
 katnotes wikilinks <id> [--move]   # turn [[page]] text into links, creating missing pages
+katnotes run [command] [args…] [--note <id>]   # run one of your Lua : commands (no command: list them)
 katnotes graph [id] [--depth N] [--tags] [--missing] [--no-journal] [--format text|dot|json]   # the link graph (with an id: around that note)
 katnotes config path|show|edit|set
 ```
