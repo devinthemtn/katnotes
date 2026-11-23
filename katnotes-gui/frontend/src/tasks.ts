@@ -59,6 +59,8 @@ export function metaChips(pairs: MetaPair[]): string {
     } else if (key === 'pri') {
       cls += ` pri-${/^(high|med|low)$/.test(value) ? value : 'other'}`;
       label = `${value} priority`;
+    } else if (key === 'kt') {
+      label = value === 'new' ? 'katTasks (on save)' : 'katTasks';
     } else if (key === 'start' && dateState(value) === 'future') {
       cls += ' not-started';
       label = `starts ${value}`;

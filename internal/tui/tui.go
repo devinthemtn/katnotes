@@ -44,6 +44,8 @@ func Run(app *cli.App) error {
 	if d, err := config.Dir(); err == nil {
 		luacmd.WriteExamples(d) //nolint:errcheck // the examples are a convenience
 	}
+	// Sync failures go to the status line, not over the screen.
+	app.Store.OnTodoError = nil
 	m := newModel(app, style)
 	if themeErr != nil {
 		m.setErr(themeErr)
@@ -105,7 +107,16 @@ func (i noteItem) Title() string {
 	if i.n.Problem != "" {
 		t = "⚠ " + t
 	}
-	return t
+	return t + todoMark(&i.n)
+}
+
+// todoMark is " ⇄" after the title of a note with tasks linked to todo.txt
+// (katTasks), or "".
+func todoMark(n *notes.Note) string {
+	if n.TodoLinks == 0 {
+		return ""
+	}
+	return " ⇄"
 }
 
 // Description is the lines under the title (the GUI sidebar shows the same):
@@ -156,7 +167,7 @@ func (i tagItem) FilterValue() string { return i.t.Tag }
 // taskNoteItem is a note that contains tasks (Tasks tab, notes view).
 type taskNoteItem struct{ nt notes.NoteTasks }
 
-func (i taskNoteItem) Title() string { return i.nt.Note.Title }
+func (i taskNoteItem) Title() string { return i.nt.Note.Title + todoMark(&i.nt.Note) }
 func (i taskNoteItem) Description() string {
 	parts := []string{fmt.Sprintf("%d/%d done", i.nt.Done, i.nt.Open+i.nt.Done)}
 	if t, ok := firstOpen(i.nt.Tasks); ok {
@@ -192,6 +203,9 @@ func (i taskItem) Title() string {
 }
 func (i taskItem) Description() string {
 	var parts []string
+	if i.t.Meta[notes.MetaLink] != "" {
+		parts = append(parts, "⇄ katTasks")
+	}
 	if s, ok := i.t.Meta[notes.MetaStart]; ok && !i.t.Done && s > time.Now().Format(notes.DateLayout) {
 		parts = append(parts, "starts "+s)
 	}
@@ -466,8 +480,20 @@ func newModel(app *cli.App, style string) model {
 	}
 	m.fmOpen = !app.Cfg.FrontmatterCollapsed
 	m.mouse = app.Cfg.TUIMouse
+	todoStatus := m.syncTodo()
 	m.reload()
-	m.applyStartPage()
+	if app.OpenNote != "" {
+		if n := m.noteByKey(app.OpenNote); n != nil {
+			m.showNote(n)
+		} else {
+			m.setErr(fmt.Errorf("--open: no note %s", app.OpenNote))
+		}
+	} else {
+		m.applyStartPage()
+	}
+	if todoStatus != "" && m.status == "" {
+		m.setStatus(todoStatus)
+	}
 	return m
 }
 
@@ -696,8 +722,32 @@ func (m *model) hasItem(k string) bool {
 	return false
 }
 
-func (m *model) setErr(err error)   { m.status, m.isErr = err.Error(), true }
-func (m *model) setStatus(s string) { m.status, m.isErr = s, false }
+func (m *model) setErr(err error) { m.status, m.isErr = err.Error(), true }
+
+// setStatus shows s, or a todo.txt sync failure from the last save.
+func (m *model) setStatus(s string) {
+	if err := m.app.Store.TakeTodoError(); err != nil {
+		m.setErr(err)
+		return
+	}
+	m.status, m.isErr = s, false
+}
+
+// syncTodo pulls tasks checked in todo.txt (katTasks) into the notes when
+// [todo_txt] is on. It returns a status line, empty when nothing changed.
+func (m *model) syncTodo() string {
+	if m.app.Store.Todo == nil {
+		return ""
+	}
+	changes, err := m.app.Store.SyncTodo(false)
+	if err != nil {
+		return "todo.txt: " + err.Error()
+	}
+	if len(changes) == 0 {
+		return ""
+	}
+	return "todo.txt: " + commands.SummarizeTodo(changes)
+}
 
 func (m *model) selected() *notes.Note { return noteOf(m.list.SelectedItem()) }
 
@@ -1186,6 +1236,16 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.reload()
 		}
 		return m, nil
+	case "K":
+		if it, ok := m.list.SelectedItem().(taskItem); ok {
+			if _, err := m.app.Store.PushTask(it.n.Kind, it.n.ID, it.t.Line); err != nil {
+				m.setErr(err)
+			} else {
+				m.setStatus("linked to todo.txt (katTasks)")
+			}
+			m.reload()
+		}
+		return m, nil
 	case "@":
 		if it, ok := m.list.SelectedItem().(taskItem); ok {
 			m.dueTask = &it
@@ -1441,8 +1501,13 @@ func (m *model) resetCache() { m.cache = map[string]string{} }
 // reloadAll rereads every note and redraws the previews (R and :reload).
 func (m *model) reloadAll() {
 	m.resetCache()
+	todo := m.syncTodo()
 	m.reload()
-	m.setStatus("reloaded")
+	if todo != "" {
+		m.setStatus("reloaded · " + todo)
+	} else {
+		m.setStatus("reloaded")
+	}
 }
 
 func (m *model) openHelp() {
@@ -1807,6 +1872,7 @@ var helpSections = []helpSec{
 		{"w", "all-tasks view: cycle any date → overdue → due this week"},
 		{"@", "all-tasks view: set the due date (today, tom, fri, +3d, …)"},
 		{"p", "all-tasks view: cycle priority (high → med → low → none)"},
+		{"K", "all-tasks view: link the task to todo.txt for katTasks ([todo_txt] in config)"},
 	}},
 	{"Finding", []helpEntry{
 		{"/", "live search; tab switches Name (fuzzy title/filename) · Tags · Text"},

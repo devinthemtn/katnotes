@@ -26,6 +26,9 @@ type App struct {
 	Out   io.Writer
 	// Version of the running binary.
 	Version string
+	// OpenNote is the note (kind/id) the TUI starts on (--open), over
+	// start_page.
+	OpenNote string
 
 	jsonOut bool
 	dir     string
@@ -55,6 +58,7 @@ func NewRoot(version string, tui TUIFunc) *cobra.Command {
 			}
 			app.Cfg = cfg
 			app.Store = commands.NewStore(cfg)
+			app.Store.OnTodoError = func(err error) { fmt.Fprintln(cmd.ErrOrStderr(), "katnotes:", err) }
 			return app.Store.Init()
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -66,6 +70,7 @@ func NewRoot(version string, tui TUIFunc) *cobra.Command {
 	}
 	root.PersistentFlags().BoolVar(&app.jsonOut, "json", false, "machine-readable JSON output")
 	root.PersistentFlags().StringVar(&app.dir, "dir", "", "notes directory (overrides config and $KATNOTES_DIR)")
+	root.Flags().StringVar(&app.OpenNote, "open", "", "start the TUI on this note (kind/id, e.g. page/house; katTasks' open_note uses it)")
 
 	root.AddCommand(
 		initCmd(app), newCmd(app), lsCmd(app), showCmd(app), editCmd(app),

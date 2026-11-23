@@ -228,12 +228,15 @@ func TestSetEveryKey(t *testing.T) {
 		"font.body":             {"Inter", func(c Config) bool { return c.Font.Body == "Inter" }},
 		"font.mono":             {"Iosevka", func(c Config) bool { return c.Font.Mono == "Iosevka" }},
 		"font.size":             {"18px", func(c Config) bool { return c.Font.Size == 18 }},
+		"todo_txt.enabled":      {"true", func(c Config) bool { return c.TodoTxt.Enabled }},
+		"todo_txt.file":         {"~/t/todo.txt", func(c Config) bool { return c.TodoTxt.File == "~/t/todo.txt" }},
+		"todo_txt.done_file":    {"/x/done.txt", func(c Config) bool { return c.TodoTxt.DoneFile == "/x/done.txt" }},
 	}
 	bad := map[string]string{
 		"previewer_mode": "sideways", "default_kind": "note", "date_format": "21/11/2026",
 		"start_page": "elsewhere", "frontmatter_collapsed": "yes please",
 		"task_done_date": "2", "tui_mouse": "maybe", "theme": "../x",
-		"font.size": "1",
+		"font.size": "1", "todo_txt.enabled": "on-ish",
 	}
 	for _, k := range Keys {
 		g, ok := good[k]

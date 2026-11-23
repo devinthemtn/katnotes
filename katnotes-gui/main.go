@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"runtime/debug"
+	"strings"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
@@ -47,6 +48,11 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	svc.startNote = openArg(os.Args[1:])
+
+	// win is set below. Launching katnotes-gui again (as katTasks' open_note
+	// does with --open page/x) hands the note to this window instead.
+	var win *application.WebviewWindow
 
 	app := application.New(application.Options{
 		Name:        "katnotes-gui",
@@ -65,9 +71,23 @@ func main() {
 		Linux: application.LinuxOptions{
 			ProgramName: "katnotes-gui",
 		},
+		SingleInstance: &application.SingleInstanceOptions{
+			UniqueID: "com.devinthemtn.katnotes-gui",
+			OnSecondInstanceLaunch: func(data application.SecondInstanceData) {
+				if win == nil {
+					return
+				}
+				win.Show()
+				win.Focus()
+				if key := openArg(data.Args); key != "" {
+					detail, _ := json.Marshal(key)
+					win.ExecJS(fmt.Sprintf(`window.dispatchEvent(new CustomEvent("katnotes:open-note", {detail: %s}))`, detail))
+				}
+			},
+		},
 	})
 
-	win := app.Window.NewWithOptions(application.WebviewWindowOptions{
+	win = app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title:            "KatNotes",
 		Width:            1200,
 		Height:           780,
@@ -109,4 +129,17 @@ func main() {
 	if err := app.Run(); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// openArg returns the note in --open kind/id (or --open=kind/id), or "".
+func openArg(args []string) string {
+	for i, a := range args {
+		if v, ok := strings.CutPrefix(a, "--open="); ok {
+			return v
+		}
+		if a == "--open" && i+1 < len(args) {
+			return args[i+1]
+		}
+	}
+	return ""
 }

@@ -23,6 +23,13 @@ const BUILTIN_KEYS: [string, string][] = [
   ['pri', 'priority'],
   ['start', 'start date'],
 ];
+const LINK_KEY: [string, string] = ['kt', 'link to katTasks (todo.txt)'];
+
+// Whether [todo_txt] is on, so kt (link to katTasks) is offered as a key.
+let todoLinks = false;
+export function setTodoLinks(on: boolean) {
+  todoLinks = on;
+}
 const MAX_ITEMS = 8;
 
 // Where the caret is inside a task's trailing {…} block, or null when the
@@ -99,18 +106,21 @@ export function suggest(ctx: MetaContext, stats: MetaStat[], now = new Date()): 
     const out: Suggestion[] = [];
     const used = new Set(ctx.used);
     const counts = new Map(stats.map((s) => [s.key, s.count]));
-    for (const [k, desc] of BUILTIN_KEYS) {
+    for (const [k, desc] of todoLinks ? [...BUILTIN_KEYS, LINK_KEY] : BUILTIN_KEYS) {
       const n = counts.get(k);
       out.push({ label: k, detail: n ? `${desc} · used ${n}×` : desc, insert: k + ':', then: 'value' });
     }
     for (const s of stats) {
-      if (BUILTIN_KEYS.some(([k]) => k === s.key) || s.key === 'done') continue;
+      if (BUILTIN_KEYS.some(([k]) => k === s.key) || s.key === 'done' || (todoLinks && s.key === 'kt')) continue;
       out.push({ label: s.key, detail: `used ${s.count}×`, insert: s.key + ':', then: 'value' });
     }
     return out.filter((s) => !used.has(s.label) && s.label.startsWith(ctx.prefix)).slice(0, MAX_ITEMS);
   }
   const p = ctx.prefix.toLowerCase();
   if (DATE_KEYS.has(ctx.key)) return dateSuggestions(ctx.prefix, now).slice(0, MAX_ITEMS);
+  if (ctx.key === 'kt') {
+    return 'new'.startsWith(p) ? [{ label: 'new', detail: 'gets an ID and a todo.txt line on save', insert: 'new' }] : [];
+  }
   if (ctx.key === 'pri') {
     return ([['high', 'highest'], ['med', 'medium'], ['low', 'lowest']] as const)
       .filter(([v]) => v.startsWith(p))

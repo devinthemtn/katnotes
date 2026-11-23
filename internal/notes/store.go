@@ -106,6 +106,9 @@ type Note struct {
 	// written to (see FileStamp). Unlike Updated, which an updated: field
 	// in the frontmatter overrides, it changes whenever the file does.
 	Stamp string `json:"stamp,omitempty"`
+	// TodoLinks is how many of the note's tasks are linked to todo.txt
+	// (katTasks) with {kt:…}, for the apps' ⇄ mark.
+	TodoLinks int `json:"todoLinks,omitempty"`
 
 	d *derived // links, tasks and lowercased body (see cache.go)
 }
@@ -162,6 +165,13 @@ type Store struct {
 	Now func() time.Time
 	// NoDoneDate stops SetTask from stamping done:<date> into task metadata.
 	NoDoneDate bool
+	// Todo, when set, links tasks marked {kt:…} to lines in a todo.txt
+	// file: Save writes them there (see todosync.go).
+	Todo *TodoSync
+	// OnTodoError is told about todo.txt sync failures. They never stop a
+	// note being saved. The last one is also kept for TakeTodoError.
+	OnTodoError func(error)
+	todoErr     error
 
 	cache noteCache
 }
@@ -229,6 +239,7 @@ func (s *Store) load(kind Kind, id, path string) (*Note, error) {
 		return nil, err
 	}
 	if n, ok := s.cache.get(path, fi); ok {
+		n.TodoLinks = n.todoLinks()
 		return n, nil
 	}
 	data, err := os.ReadFile(path)
@@ -268,6 +279,7 @@ func (s *Store) load(kind Kind, id, path string) (*Note, error) {
 	n.Snippet = snippet(n.Body)
 	n.Stamp = FileStamp(fi)
 	n.d = &derived{body: n.Body}
+	n.TodoLinks = n.todoLinks()
 	s.cache.put(path, fi, n)
 	return n, nil
 }
@@ -552,7 +564,7 @@ func (s *Store) Create(kind Kind, title string, tags []string, body string) (*No
 	if n.Body == "" {
 		n.Body = "# " + n.Title + "\n\n"
 	}
-	if err := s.write(n, true); err != nil {
+	if err := s.writeSynced(n, true); err != nil {
 		return nil, err
 	}
 	n.Snippet = snippet(n.Body)
@@ -584,7 +596,7 @@ func (s *Store) createJournal(d time.Time, tags []string, body string) (*Note, e
 		}
 		n.Extra = t.Extra
 	}
-	if err := s.write(n, true); err != nil {
+	if err := s.writeSynced(n, true); err != nil {
 		return nil, err
 	}
 	n.Snippet = snippet(n.Body)
@@ -641,11 +653,38 @@ func (s *Store) Save(n *Note) error {
 		n.Created = now
 	}
 	n.Updated = now
-	if err := s.write(n, false); err != nil {
+	if err := s.writeSynced(n, false); err != nil {
 		return err
 	}
 	n.Snippet = snippet(n.Body)
 	return nil
+}
+
+// writeSynced is write, plus the todo.txt sync of n's linked tasks when
+// s.Todo is set. A sync failure is reported, not returned.
+func (s *Store) writeSynced(n *Note, exclusive bool) error {
+	if s.Todo == nil || !HasTodoLinks(n.Body) {
+		return s.write(n, exclusive)
+	}
+	werr, serr := s.Todo.saveLinked(n, s.now(), s.NoDoneDate, func() error { return s.write(n, exclusive) })
+	if werr != nil {
+		return werr
+	}
+	if serr != nil {
+		s.todoErr = fmt.Errorf("todo.txt: %w", serr)
+		if s.OnTodoError != nil {
+			s.OnTodoError(s.todoErr)
+		}
+	}
+	return nil
+}
+
+// TakeTodoError returns the last todo.txt sync failure since the previous
+// call, or nil, and clears it.
+func (s *Store) TakeTodoError() error {
+	err := s.todoErr
+	s.todoErr = nil
+	return err
 }
 
 // Rename changes a note's title. Pages also move to the new slug, and links
@@ -725,6 +764,7 @@ func (s *Store) write(n *Note, exclusive bool) error {
 		}
 	}
 	syncTaskFlag(n)
+	n.TodoLinks = countTodoLinks(ParseTasks(n.Body))
 	data, err := encodeNote(n)
 	if err != nil {
 		return err

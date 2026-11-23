@@ -4,7 +4,7 @@
   import { highlightExtension } from './highlight';
   import DOMPurify from 'dompurify';
   import { checkboxHTML, decorateTasks, toggleTask, makeTask, continueList, setTaskLine, setTaskMetaLine, metaChips, setStampDone, dateState, today, ensureMetaBlock } from './tasks';
-  import { metaContext, suggest, applySuggestion, shouldPairBrace, type MetaContext, type MetaStat, type Suggestion } from './metacomplete';
+  import { metaContext, suggest, setTodoLinks, applySuggestion, shouldPairBrace, type MetaContext, type MetaStat, type Suggestion } from './metacomplete';
   import { SLASH, matchSlash, mergeSlash, slashQuery, slashToken, expandSlash, applyUserResult, caretXY, type SlashCommand } from './slash';
   import { linkQuery, linkSuggestions, linkMarkdown, linkText, applyLink, decorateLinks, keyOf, type NoteRef, type LinkSuggestion } from './links';
   import { rewriteImageSrc, imageFiles, isImage, assetName, fileToBase64, imageInsert } from './images';
@@ -268,6 +268,7 @@
     ]},
   ];
   let cfg: Config | null = $state(null);
+  let todoEnabled = $state(false); // [todo_txt] is on: show the katTasks link button
 
   let searchEl: HTMLInputElement | undefined = $state();
   let bodyEl: HTMLTextAreaElement | undefined = $state();
@@ -387,17 +388,22 @@
     // The file changed underneath us: only "Keep mine" may overwrite it.
     if (conflict && !force) return;
     const target = current;
+    const sent = draftBody;
     saveState = 'saving';
     try {
-      const n = await api.Save(target.kind, target.id, parseTags(draftTags), draftBody, target.stamp ?? '', force);
+      const n = await api.Save(target.kind, target.id, parseTags(draftTags), sent, target.stamp ?? '', force);
       // Our own write isn't an external edit.
       if (n?.stamp && extWatch?.key === keyOf(target)) extWatch.stamp = n.stamp;
       if (n && current && keyOf(current) === keyOf(target)) {
+        // Saving can rewrite task lines ({kt:new} gets its ID, done state
+        // from todo.txt): take that in unless more was typed meanwhile.
+        if (draftBody === sent && n.body !== sent && n.body !== sent + '\n') adoptBody(n.body);
         current = { ...n, body: draftBody };
         dirty = false;
         conflict = false;
         saveState = 'saved';
       }
+      api.TodoError().then((m) => { if (m) flash(m, true); });
       await refreshList();
       loadMetaStats();
       loadBacklinks();
@@ -409,6 +415,50 @@
       } else {
         flash(msg, true);
       }
+    }
+  }
+
+  // Replace the editor text with body, keeping the caret where it was
+  // relative to the text around it.
+  function adoptBody(body: string) {
+    const el = bodyEl;
+    const old = draftBody;
+    let pre = 0;
+    while (pre < old.length && pre < body.length && old[pre] === body[pre]) pre++;
+    const shift = (pos: number) => (pos > pre ? pos + body.length - old.length : pos);
+    const focused = el && document.activeElement === el;
+    const a = el ? shift(el.selectionStart) : 0;
+    const b = el ? shift(el.selectionEnd) : 0;
+    draftBody = body;
+    if (focused) tick().then(() => el!.setSelectionRange(a, b));
+  }
+
+  // Take tasks checked in katTasks (todo.txt) into the notes.
+  async function syncTodo(announce = false) {
+    try {
+      const r = await api.SyncTodo();
+      if (!r?.enabled) return;
+      todoEnabled = true;
+      setTodoLinks(true);
+      const notable = (r.changes ?? []).some((c) => c.action !== 'updated' && c.action !== 'added');
+      if (announce && notable) flash('todo.txt: ' + r.summary);
+      if (r.notes && mainView === 'tasks') taskNotes = (await api.Tasks()) ?? [];
+    } catch (e) {
+      flash('todo.txt: ' + errMsg(e), true);
+    }
+  }
+
+  // Link a task to katTasks, or write its todo.txt line again.
+  async function pushTaskIn(nt: NoteTasks, t: Task) {
+    const linked = t.meta?.kt && t.meta.kt !== 'new';
+    if (!linked) return setTaskMetaIn(nt, t, 'kt', 'new');
+    try {
+      await flushSave();
+      await api.PushTask(nt.note.kind, nt.note.id, t.line);
+      const m = await api.TodoError();
+      flash(m || 'written to todo.txt', !!m);
+    } catch (e) {
+      flash(errMsg(e), true);
     }
   }
 
@@ -690,6 +740,9 @@
       await applyTheme();
       fmOpen = !c.frontmatter_collapsed;
       setStampDone(c.task_done_date !== false);
+      todoEnabled = !!c.todo_txt?.enabled;
+      setTodoLinks(todoEnabled);
+      if (todoEnabled) syncTodo(true);
       if (settingsOpen) cfg = c;
       await loadUserSlash(true);
       await loadCmdCatalog();
@@ -699,6 +752,23 @@
     } catch (e) {
       flash(errMsg(e), true);
     }
+  }
+
+  // Open a note given as "kind/id", saying so if it's gone.
+  async function openKey(key: string) {
+    const [kind, ...rest] = key.split('/');
+    const id = rest.join('/');
+    if ((kind !== 'page' && kind !== 'journal') || !id) {
+      flash(`can't open ${key}: want page/<id> or journal/<id>`, true);
+      return;
+    }
+    await open(kind, id);
+  }
+
+  // A second katnotes-gui launch with --open sends its note here.
+  function onOpenNote(e: Event) {
+    const key = (e as CustomEvent<string>).detail;
+    if (key) openKey(key);
   }
 
   // Open whatever the start_page option asks for on launch.
@@ -711,6 +781,9 @@
       setStampDone(c.task_done_date !== false);
       start = c.start_page || 'none';
     } catch { return; }
+    // katnotes-gui --open kind/id (katTasks' open_note) beats start_page.
+    const given = await api.StartNote().catch(() => '');
+    if (given) return openKey(given);
     if (start === 'today') return openToday();
     // "last" is the newest note in the recent file the TUI shares.
     const target = start === 'last' ? await api.LastNote().catch(() => '') : start;
@@ -751,6 +824,11 @@
       applyFonts(cfg);
       if (key === 'frontmatter_collapsed') fmOpen = !cfg.frontmatter_collapsed;
       if (key === 'task_done_date') setStampDone(cfg.task_done_date !== false);
+      if (key.startsWith('todo_txt.')) {
+        todoEnabled = !!cfg.todo_txt?.enabled;
+        setTodoLinks(todoEnabled);
+        if (todoEnabled) await syncTodo(true);
+      }
       if (key.endsWith('theme')) await applyTheme();
       flash(`saved ${key}`);
     } catch (e) {
@@ -793,6 +871,10 @@
   // Pick up edits made by the CLI/TUI when the window regains focus.
   async function onFocus() {
     applyTheme();
+    if (todoEnabled) {
+      await flushSave();
+      await syncTodo(true);
+    }
     await refreshList();
     loadLinkTargets();
     loadBacklinks();
@@ -1992,7 +2074,7 @@
     loadUserSlash();
     loadMetaStats();
     loadLinkTargets();
-    loadViewState().then(refreshList).then(openStartPage);
+    syncTodo(true).then(loadViewState).then(refreshList).then(openStartPage);
     loadCmdCatalog();
     window.addEventListener('focus', onFocus);
     applyTheme();
@@ -2000,6 +2082,7 @@
     // Ctrl+Shift+Z is bound in main.go (Wails swallows it on Linux).
     window.addEventListener('katnotes:toggle-zoom', toggleZoom);
     window.addEventListener('katnotes:files-dropped', onNativeDrop);
+    window.addEventListener('katnotes:open-note', onOpenNote);
     window.addEventListener('beforeunload', () => { if (dirty) save(); });
     return () => {
       stopExternalWatch();
@@ -2007,6 +2090,7 @@
       window.removeEventListener('focus', onFocus);
       window.removeEventListener('katnotes:toggle-zoom', toggleZoom);
       window.removeEventListener('katnotes:files-dropped', onNativeDrop);
+      window.removeEventListener('katnotes:open-note', onOpenNote);
     };
   });
 </script>
@@ -2129,7 +2213,7 @@
               onclick={() => open(n.kind, n.id)}
             >
               <!-- Same rows as the TUI list: dates line, then tags; a search adds the hit. -->
-              <span class="title">{#if n.problem}<span class="warn" title={n.problem}>⚠</span>{/if}{#if n.extra?.pinned === true}<span class="pin" title="pinned">📌</span>{/if}{#each hlChars(n.title, m?.nameHits) as sg}{#if sg.on}<mark>{sg.t}</mark>{:else}{sg.t}{/if}{/each}</span>
+              <span class="title">{#if n.problem}<span class="warn" title={n.problem}>⚠</span>{/if}{#if n.extra?.pinned === true}<span class="pin" title="pinned">📌</span>{/if}{#each hlChars(n.title, m?.nameHits) as sg}{#if sg.on}<mark>{sg.t}</mark>{:else}{sg.t}{/if}{/each}{#if n.todoLinks}<span class="kt-mark" title="{n.todoLinks} task(s) linked to katTasks (todo.txt)">⇄</span>{/if}</span>
               {#if n.kind === 'journal'}
                 <span class="meta">{n.id}{#each n.tags ?? [] as t}<span class="tag">#{t}</span>{/each}</span>
               {:else}
@@ -2198,6 +2282,9 @@
               <input type="date" class="task-due" value={t.meta?.due ?? ''} title="Due date" aria-label="Due date"
                 onchange={(e) => setTaskMetaIn(nt, t, 'due', (e.currentTarget as HTMLInputElement).value)} />
               <button class="task-pri" onclick={() => cyclePri(nt, t)} title="Priority: none → high → med → low">!</button>
+              {#if todoEnabled}
+                <button class="task-pri" onclick={() => pushTaskIn(nt, t)} title={t.meta?.kt && t.meta.kt !== 'new' ? 'Linked to katTasks: write its todo.txt line again' : 'Link to katTasks (todo.txt)'}>⇄</button>
+              {/if}
             </span>
           </li>
         {/snippet}
@@ -2212,7 +2299,7 @@
           {#each taskGroups as g (keyOf(g.nt.note))}
             <div class="task-group">
               <button class="task-note" onclick={() => open(g.nt.note.kind, g.nt.note.id)}>
-                {g.nt.note.title}
+                {g.nt.note.title}{#if g.nt.note.todoLinks}<span class="kt-mark" title="{g.nt.note.todoLinks} task(s) linked to katTasks (todo.txt)">⇄</span>{/if}
                 <span class="task-note-meta">{g.nt.note.kind === 'journal' ? g.nt.note.id : 'page'} · {g.nt.open} open · {g.nt.done} done</span>
               </button>
               <ul>
@@ -2241,6 +2328,7 @@
         />
         <div class="head-row">
           <span class="kind">{current.kind}/{current.id}</span>
+          {#if current.todoLinks}<span class="kt-badge" title="{current.todoLinks} task(s) linked to katTasks (todo.txt)">⇄ katTasks {current.todoLinks}</span>{/if}
           <input
             class="tags-input"
             bind:this={tagsEl}

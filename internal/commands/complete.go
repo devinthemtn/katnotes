@@ -480,3 +480,24 @@ func noteSuggestions(env *Env, q, skip string) []Suggestion {
 	}
 	return out
 }
+
+// unlinkedTodos suggests the open todo.txt tasks not linked to a note yet.
+// The value is the whole line, so import-task finds exactly that one.
+func unlinkedTodos(env *Env, _ []string) []Suggestion {
+	ts, err := env.Store.UnlinkedTodos()
+	if err != nil {
+		return nil
+	}
+	out := make([]Suggestion, 0, len(ts))
+	for _, t := range ts {
+		detail := []string{fmt.Sprintf("todo.txt:%d", t.Line)}
+		if t.Pri != "" {
+			detail = append(detail, t.Pri)
+		}
+		if t.Due != "" {
+			detail = append(detail, "due "+t.Due)
+		}
+		out = append(out, Suggestion{Value: t.Raw, Label: t.Text, Detail: strings.Join(detail, " · ")})
+	}
+	return out
+}

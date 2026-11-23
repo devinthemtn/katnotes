@@ -1,7 +1,7 @@
 // Run with: npm test (node --test; Node 22.18+/24 strips the types).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { metaContext, suggest, applySuggestion, shouldPairBrace, type MetaStat } from './metacomplete.ts';
+import { metaContext, suggest, setTodoLinks, applySuggestion, shouldPairBrace, type MetaStat } from './metacomplete.ts';
 import { normalizeDate, ensureMetaBlock } from './tasks.ts';
 
 const now = new Date(2026, 10, 17, 15, 0); // Tuesday 2026-11-17, like the Go tests
@@ -91,4 +91,16 @@ test('normalizeDate matches Go', () => {
   };
   for (const [i, w] of Object.entries(cases)) assert.equal(normalizeDate(i, now), w, i);
   for (const bad of ['2026-13-01', 'soon', '11/20']) assert.equal(normalizeDate(bad, now), null, bad);
+});
+
+test('kt is offered only with todo.txt links on', () => {
+  const keys = (s: string) => suggest(metaContext(at(s).line, at(s).col)!, stats, now).map((x) => x.label);
+  assert.ok(!keys('- [ ] a {|}').includes('kt'));
+  setTodoLinks(true);
+  try {
+    assert.ok(keys('- [ ] a {k|}').includes('kt'));
+    assert.deepEqual(suggest(metaContext(at('- [ ] a {kt:|}').line, at('- [ ] a {kt:|}').col)!, stats, now).map((x) => x.insert), ['new']);
+  } finally {
+    setTodoLinks(false);
+  }
 });

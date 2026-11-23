@@ -33,6 +33,7 @@ export const SLASH: SlashCommand[] = [
   { name: 'due', desc: () => 'Set the task due date  {due:…}', meta: 'due' },
   { name: 'pri', desc: () => 'Set the task priority  {pri:…}', meta: 'pri' },
   { name: 'start', desc: () => 'Set the task start date  {start:…}', meta: 'start' },
+  { name: 'kattasks', desc: () => 'Link the task to katTasks (todo.txt)  {kt:new}', meta: 'kt' },
   { name: 'today', desc: () => isoDate(0), text: () => isoDate(0) },
   { name: 'tomorrow', desc: () => isoDate(1), text: () => isoDate(1) },
   { name: 'yesterday', desc: () => isoDate(-1), text: () => isoDate(-1) },

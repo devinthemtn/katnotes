@@ -31,6 +31,11 @@ func NewStore(cfg config.Config) *notes.Store {
 	s.JournalTemplate = cfg.JournalTemplate
 	s.DateFormat = cfg.DateFormat
 	s.NoDoneDate = !cfg.TaskDoneDate
+	if cfg.TodoTxt.Enabled {
+		todo, done := cfg.TodoTxt.TodoFiles()
+		state, _ := config.File("todo-sync.json")
+		s.Todo = &notes.TodoSync{File: todo, DoneFile: done, StatePath: state}
+	}
 	return s
 }
 
@@ -269,6 +274,9 @@ func init() {
 			{Name: "filter", Kind: ArgChoice, Optional: true, Many: true, Choices: []string{"open", "done", "all", "any", "overdue", "week"}},
 		}},
 		{Name: "sync-tasks", Desc: "Update contains_task in every note's frontmatter", run: runSyncTasks},
+		{Name: "sync-todo", Desc: "Sync linked {kt:…} tasks with todo.txt (katTasks): take tasks checked there into notes", run: runSyncTodo},
+		{Name: "import-task", Desc: "Bring an unlinked todo.txt (katTasks) task into this note (or today's journal) as a linked task", Args: []Arg{{Name: "task", Kind: ArgText, Rest: true, complete: unlinkedTodos}}, run: runImportTask},
+		{Name: "push-task", Desc: "Link the task on a line of this note to todo.txt (katTasks), or write its line again", NeedsNote: true, Args: []Arg{{Name: "line", Kind: ArgText}}, run: runPushTask},
 		{Name: "sync", Desc: "Git: commit all notes, then pull and push", Long: true, run: runSync},
 		{Name: "git status", Desc: "Git: notes changed since the last commit", run: runGitStatus},
 		{Name: "terminal", Desc: "Open a terminal in the note's folder", UI: true},

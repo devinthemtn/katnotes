@@ -127,6 +127,18 @@
     <input type="checkbox" checked={cfg.task_done_date !== false} onchange={(e) => onsave('task_done_date', checked(e))} />
     Add {'{'}done:date{'}'} when a task is checked
   </label>
+  <label class="check">
+    <input type="checkbox" checked={!!cfg.todo_txt?.enabled} onchange={(e) => onsave('todo_txt.enabled', checked(e))} />
+    Link {'{'}kt:new{'}'} tasks to todo.txt (katTasks)
+  </label>
+  <div class="row font-row">
+    <label>todo.txt
+      <input value={cfg.todo_txt?.file ?? ''} placeholder="katTasks' files.todo, else ~/todo.txt" onchange={(e) => onsave('todo_txt.file', val(e))} />
+    </label>
+    <label>done.txt
+      <input value={cfg.todo_txt?.done_file ?? ''} placeholder="next to todo.txt" onchange={(e) => onsave('todo_txt.done_file', val(e))} />
+    </label>
+  </div>
   <div class="row font-row">
     <label>Open notes with (:external)
       <input value={cfg.open_with} placeholder="system default (xdg-open)" onchange={(e) => onsave('open_with', val(e))} />

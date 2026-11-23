@@ -68,6 +68,68 @@ type Config struct {
 	GUITheme string `toml:"gui_theme" json:"gui_theme"`
 	// Font sets the GUI's fonts and base text size.
 	Font Font `toml:"font" json:"font"`
+	// TodoTxt links tasks marked {kt:new} to a todo.txt file, e.g. the one
+	// katTasks uses ([todo_txt] in config.toml).
+	TodoTxt TodoTxt `toml:"todo_txt" json:"todo_txt"`
+}
+
+// TodoTxt holds the todo.txt link options.
+type TodoTxt struct {
+	Enabled bool `toml:"enabled" json:"enabled"`
+	// File is the todo.txt file. Empty uses files.todo from katTasks'
+	// config.toml, else ~/todo.txt.
+	File string `toml:"file" json:"file"`
+	// DoneFile is where completed tasks are archived. Empty uses files.done
+	// from katTasks' config, else done.txt next to File.
+	DoneFile string `toml:"done_file" json:"done_file"`
+}
+
+// TodoFiles returns the todo.txt and done.txt paths, with ~ and $VARS
+// expanded, filling empty ones from katTasks' own settings.
+func (t TodoTxt) TodoFiles() (todo, done string) {
+	todo, done = expandPath(t.File), expandPath(t.DoneFile)
+	if todo == "" {
+		kt := katTasksFiles()
+		todo = kt.Todo
+		if done == "" {
+			done = kt.Done
+		}
+	}
+	if todo == "" {
+		todo = ExpandHome("~/todo.txt")
+	}
+	if done == "" {
+		done = filepath.Join(filepath.Dir(todo), "done.txt")
+	}
+	return todo, done
+}
+
+// katTasksFiles reads [files] from katTasks' config.toml
+// (os.UserConfigDir()/katTasks/config.toml). Missing values are empty.
+func katTasksFiles() (f struct{ Todo, Done string }) {
+	base, err := os.UserConfigDir()
+	if err != nil {
+		return f
+	}
+	var kt struct {
+		Files struct {
+			Todo string `toml:"todo"`
+			Done string `toml:"done"`
+		} `toml:"files"`
+	}
+	if _, err := toml.DecodeFile(filepath.Join(base, "katTasks", "config.toml"), &kt); err != nil {
+		return f
+	}
+	f.Todo, f.Done = expandPath(kt.Files.Todo), expandPath(kt.Files.Done)
+	return f
+}
+
+func expandPath(p string) string {
+	p = strings.TrimSpace(p)
+	if p == "" {
+		return ""
+	}
+	return ExpandHome(os.ExpandEnv(p))
 }
 
 // Font holds the GUI font options ([font] in config.toml). Empty families use
@@ -262,7 +324,7 @@ func ExpandHome(p string) string {
 }
 
 // Keys lists the option names accepted by Set.
-var Keys = []string{"notes_dir", "editor", "previewer", "previewer_mode", "default_kind", "journal_template", "date_format", "open_with", "tui_open_with", "start_page", "frontmatter_collapsed", "task_done_date", "tui_mouse", "theme", "tui_theme", "gui_theme", "font.body", "font.mono", "font.size"}
+var Keys = []string{"notes_dir", "editor", "previewer", "previewer_mode", "default_kind", "journal_template", "date_format", "open_with", "tui_open_with", "start_page", "frontmatter_collapsed", "task_done_date", "tui_mouse", "theme", "tui_theme", "gui_theme", "font.body", "font.mono", "font.size", "todo_txt.enabled", "todo_txt.file", "todo_txt.done_file"}
 
 // Set updates one option in the config file. It edits the file's own values,
 // not the env-overridden view returned by Load.
@@ -354,6 +416,16 @@ func Set(key, value string) error {
 			return fmt.Errorf("font.size must be a number of pixels from %d to %d, got %q", MinFontSize, MaxFontSize, value)
 		}
 		cfg.Font.Size = n
+	case "todo_txt.enabled":
+		b, err := strconv.ParseBool(strings.TrimSpace(value))
+		if err != nil {
+			return fmt.Errorf("todo_txt.enabled must be true or false, got %q", value)
+		}
+		cfg.TodoTxt.Enabled = b
+	case "todo_txt.file":
+		cfg.TodoTxt.File = strings.TrimSpace(value)
+	case "todo_txt.done_file":
+		cfg.TodoTxt.DoneFile = strings.TrimSpace(value)
 	case "start_page":
 		v, err := normStartPage(value)
 		if err != nil {

@@ -402,3 +402,81 @@ func runSyncTasks(env *Env, _ []string) (Result, error) {
 	}
 	return Result{Changed: true, Status: fmt.Sprintf("sync-tasks: updated %d note(s): %s", len(changes), strings.Join(ids, ", "))}, nil
 }
+
+func runSyncTodo(env *Env, _ []string) (Result, error) {
+	changes, err := env.Store.SyncTodo(false)
+	if err != nil {
+		return Result{}, err
+	}
+	return Result{Changed: TodoNotesChanged(changes), Status: "sync-todo: " + SummarizeTodo(changes)}, nil
+}
+
+// TodoNotesChanged reports whether a todo.txt sync rewrote any note.
+func TodoNotesChanged(changes []notes.TodoChange) bool {
+	for _, c := range changes {
+		if c.Action == notes.TodoChecked || c.Action == notes.TodoUnchecked || c.Action == notes.TodoLinked {
+			return true
+		}
+	}
+	return false
+}
+
+// SummarizeTodo describes a todo.txt sync in one line, e.g. "2 checked, 1
+// orphan".
+func SummarizeTodo(changes []notes.TodoChange) string {
+	if len(changes) == 0 {
+		return "in sync"
+	}
+	order := []string{notes.TodoChecked, notes.TodoUnchecked, notes.TodoLinked, notes.TodoAdded, notes.TodoUpdated, notes.TodoMissing, notes.TodoOrphan}
+	count := map[string]int{}
+	for _, c := range changes {
+		count[c.Action]++
+	}
+	var parts []string
+	for _, a := range order {
+		if count[a] > 0 {
+			parts = append(parts, fmt.Sprintf("%d %s", count[a], a))
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
+func runPushTask(env *Env, args []string) (Result, error) {
+	line, err := strconv.Atoi(strings.TrimSpace(args[0]))
+	if err != nil || line < 1 {
+		return Result{}, fmt.Errorf("push-task: want a line number (1 is the first body line), got %q", args[0])
+	}
+	n, err := env.Store.PushTask(env.Note.Kind, env.Note.ID, line-1)
+	if err != nil {
+		return Result{}, err
+	}
+	status := fmt.Sprintf("linked %s:%d to todo.txt", n.Key(), line)
+	if e := env.Store.TakeTodoError(); e != nil {
+		status = e.Error()
+	}
+	return Result{Note: n, Changed: true, Status: status}, nil
+}
+
+func runImportTask(env *Env, args []string) (Result, error) {
+	n := env.Note
+	if n == nil {
+		j, _, err := env.Store.Journal(env.now())
+		if err != nil {
+			return Result{}, err
+		}
+		n = j
+	}
+	got, line, err := env.Store.ImportTodo(n.Kind, n.ID, args[0])
+	if err != nil {
+		return Result{}, err
+	}
+	status := fmt.Sprintf("imported into %s:%d, linked to todo.txt", got.Key(), line+1)
+	if e := env.Store.TakeTodoError(); e != nil {
+		status = e.Error()
+	}
+	r := Result{Changed: true, Status: status}
+	if env.Note != nil {
+		r.Note = got
+	}
+	return r, nil
+}

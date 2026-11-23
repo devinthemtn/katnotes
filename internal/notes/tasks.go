@@ -124,22 +124,7 @@ var ErrTaskMoved = errors.New("note changed: that line is no longer a task")
 // metadata and unchecking removes it.
 func (s *Store) SetTask(kind Kind, id string, line int, done bool) (*Note, error) {
 	return s.editTaskLine(kind, id, line, func(l string) string {
-		loc := taskLine.FindStringSubmatchIndex(l)
-		mark := " "
-		if done {
-			mark = "x"
-		}
-		// loc[4]:loc[5] is the mark inside the box.
-		l = l[:loc[4]] + mark + l[loc[5]:]
-		if s.NoDoneDate {
-			return l
-		}
-		stamp := ""
-		if done {
-			stamp = s.now().Format(DateLayout)
-		}
-		l, _ = SetLineMeta(l, MetaDone, stamp)
-		return l
+		return markTaskLine(l, done, "", s.now(), s.NoDoneDate)
 	})
 }
 

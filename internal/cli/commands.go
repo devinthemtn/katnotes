@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -422,8 +423,158 @@ func tasksCmd(a *App) *cobra.Command {
 		},
 	}
 	sync.Flags().BoolVarP(&dryRun, "dry-run", "n", false, "show what would change without writing")
-	cmd.AddCommand(sync, tasksListCmd(a), tasksSetCmd(a))
+	cmd.AddCommand(sync, tasksListCmd(a), tasksSetCmd(a), tasksPushCmd(a), tasksSyncTodoCmd(a), tasksImportCmd(a))
 	return cmd
+}
+
+// parseTaskRef parses kind/id:line (1-based) into a kind, id and 0-based line.
+func parseTaskRef(s string) (notes.Kind, string, int, error) {
+	i := strings.LastIndex(s, ":")
+	ref, lineStr := s, ""
+	if i > 0 {
+		ref, lineStr = s[:i], s[i+1:]
+	}
+	kindStr, id, ok := strings.Cut(ref, "/")
+	line, err := strconv.Atoi(lineStr)
+	if i <= 0 || !ok || err != nil || line < 1 {
+		return "", "", 0, fmt.Errorf("want <kind>/<id>:<line>, got %q", s)
+	}
+	k, err := notes.ParseKind(kindStr)
+	if err != nil {
+		return "", "", 0, err
+	}
+	return k, id, line - 1, nil
+}
+
+func tasksPushCmd(a *App) *cobra.Command {
+	return &cobra.Command{
+		Use:   "push <kind/id:line>",
+		Short: "Link a task to todo.txt (katTasks), or write its line again",
+		Long: "Give the task at a 1-based body line a {kt:<id>} link and add it to the\n" +
+			"todo.txt file set under [todo_txt] in config.toml. From then on, saving the\n" +
+			"note updates the line, and \"tasks sync-todo\" takes tasks checked in katTasks\n" +
+			"back into the note. For a linked task whose line was deleted from todo.txt,\n" +
+			"push writes it again. Writing {kt:new} on a task links it too.",
+		Example: "  katnotes tasks push page/house:5",
+		Args:    cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			k, id, line, err := parseTaskRef(args[0])
+			if err != nil {
+				return err
+			}
+			n, err := a.Store.PushTask(k, id, line)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintln(a.Out, strings.Split(n.Body, "\n")[line])
+			return nil
+		},
+	}
+}
+
+func tasksImportCmd(a *App) *cobra.Command {
+	var to, file string
+	c := &cobra.Command{
+		Use:   "import <todo.txt line>",
+		Short: "Add an unlinked todo.txt (katTasks) task to a note as a linked task",
+		Long: "Find the open, unlinked todo.txt line (the whole line, or text only one\n" +
+			"line contains), tag it with kn:<id> note:<kind/id>, and add it to the note as\n" +
+			"\"- [ ] text {kt:<id> …}\". With no --to, it goes to today's journal. katTasks'\n" +
+			"add_to_note command runs this.",
+		Example: "  katnotes tasks import \"call the plumber\" --to page/house",
+		Args:    cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			st := a.Store
+			if st.Todo == nil {
+				_, err := st.UnlinkedTodos() // the "sync is off" error
+				return err
+			}
+			if file != "" {
+				file = config.ExpandHome(file)
+				if abs, err := filepath.Abs(file); err == nil {
+					file = abs
+				}
+				if file != st.Todo.File {
+					fmt.Fprintf(cmd.ErrOrStderr(), "katnotes: warning: importing from %s, but [todo_txt] file is %s; later syncs use that one\n", file, st.Todo.File)
+					st.Todo = &notes.TodoSync{File: file, DoneFile: filepath.Join(filepath.Dir(file), "done.txt"), StatePath: st.Todo.StatePath}
+				}
+			}
+			var n *notes.Note
+			var err error
+			if to == "" || to == "today" {
+				n, _, err = st.Today()
+			} else {
+				n, err = a.resolve(to, "")
+			}
+			if err != nil {
+				return err
+			}
+			got, line, err := st.ImportTodo(n.Kind, n.ID, args[0])
+			if err != nil {
+				return err
+			}
+			text := strings.Split(got.Body, "\n")[line]
+			if a.jsonOut {
+				id := ""
+				for _, t := range notes.ParseTasks(got.Body) {
+					if t.Line == line {
+						id = t.Meta[notes.MetaLink]
+					}
+				}
+				return a.printJSON(map[string]any{"note": got.Key(), "line": line + 1, "id": id, "text": text})
+			}
+			fmt.Fprintf(a.Out, "%s:%d  %s\n", got.Key(), line+1, text)
+			return nil
+		},
+	}
+	c.Flags().StringVar(&to, "to", "", "note to add it to (kind/id, id or title; default: today's journal)")
+	c.Flags().StringVar(&file, "file", "", "todo.txt to import from (default: [todo_txt] file)")
+	return c
+}
+
+func tasksSyncTodoCmd(a *App) *cobra.Command {
+	var dryRun bool
+	c := &cobra.Command{
+		Use:   "sync-todo",
+		Short: "Sync linked tasks with todo.txt (katTasks)",
+		Long: "Take tasks checked or unchecked in todo.txt (katTasks) since the last sync\n" +
+			"into their notes, and write notes edited outside KatNotes to todo.txt. When\n" +
+			"both sides changed, the note wins. Lines in todo.txt whose note task is gone\n" +
+			"are listed but never removed.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			changes, err := a.Store.SyncTodo(dryRun)
+			if a.jsonOut {
+				if changes == nil {
+					changes = []notes.TodoChange{}
+				}
+				if jerr := a.printJSON(changes); jerr != nil {
+					return jerr
+				}
+				return err
+			}
+			prefix := ""
+			if dryRun {
+				prefix = "would be "
+			}
+			for _, c := range changes {
+				at := c.Note
+				if c.Line >= 0 {
+					at = fmt.Sprintf("%s:%d", c.Note, c.Line+1)
+				}
+				fmt.Fprintf(a.Out, "%s%-10s %s  %s  %s\n", prefix, c.Action, c.ID, at, c.Text)
+			}
+			if err != nil {
+				return err
+			}
+			if len(changes) == 0 {
+				fmt.Fprintln(a.Out, "todo.txt and notes are in sync")
+			}
+			return nil
+		},
+	}
+	c.Flags().BoolVarP(&dryRun, "dry-run", "n", false, "show what would change without writing")
+	return c
 }
 
 func tasksListCmd(a *App) *cobra.Command {
@@ -533,18 +684,7 @@ func tasksSetCmd(a *App) *cobra.Command {
 		Example: "  katnotes tasks set page/groceries:3 due fri\n  katnotes tasks set page/groceries:3 pri",
 		Args:    cobra.RangeArgs(2, 3),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			i := strings.LastIndex(args[0], ":")
-			ok := i > 0
-			ref, lineStr := args[0], ""
-			if ok {
-				ref, lineStr = args[0][:i], args[0][i+1:]
-			}
-			kindStr, id, ok2 := strings.Cut(ref, "/")
-			line, err := strconv.Atoi(lineStr)
-			if !ok || !ok2 || err != nil || line < 1 {
-				return fmt.Errorf("want <kind>/<id>:<line>, got %q", args[0])
-			}
-			k, err := notes.ParseKind(kindStr)
+			k, id, line, err := parseTaskRef(args[0])
 			if err != nil {
 				return err
 			}
@@ -552,11 +692,11 @@ func tasksSetCmd(a *App) *cobra.Command {
 			if len(args) == 3 {
 				val = args[2]
 			}
-			n, err := a.Store.SetTaskMeta(k, id, line-1, args[1], val)
+			n, err := a.Store.SetTaskMeta(k, id, line, args[1], val)
 			if err != nil {
 				return err
 			}
-			fmt.Fprintln(a.Out, strings.Split(n.Body, "\n")[line-1])
+			fmt.Fprintln(a.Out, strings.Split(n.Body, "\n")[line])
 			return nil
 		},
 	}

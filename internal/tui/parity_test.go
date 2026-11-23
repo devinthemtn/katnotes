@@ -129,3 +129,22 @@ func TestLongCommandRunsInBackground(t *testing.T) {
 		t.Fatalf("status %q", m.status)
 	}
 }
+
+// --open (katTasks' open_note) beats start_page.
+func TestOpenNoteFlag(t *testing.T) {
+	t.Setenv(config.EnvConfigDir, t.TempDir())
+	st := notes.New(t.TempDir())
+	if err := st.Init(); err != nil {
+		t.Fatal(err)
+	}
+	st.Create(notes.KindPage, "Alpha", nil, "# Alpha\n")
+	st.Create(notes.KindPage, "Beta", nil, "# Beta\n")
+	m := newModel(&cli.App{Store: st, Cfg: config.Config{StartPage: "page/alpha"}, Out: io.Discard, OpenNote: "page/beta"}, "dark")
+	if got := itemKey(m.list.SelectedItem()); got != "page/beta" {
+		t.Fatalf("selected %q", got)
+	}
+	m = newModel(&cli.App{Store: st, Out: io.Discard, OpenNote: "page/nope"}, "dark")
+	if !m.isErr || !strings.Contains(m.status, "page/nope") {
+		t.Fatalf("status %q", m.status)
+	}
+}

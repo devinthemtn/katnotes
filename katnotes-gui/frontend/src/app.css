@@ -331,6 +331,8 @@ kbd {
 .cmd-item kbd { flex: none; }
 .cmd-foot { padding: 2px 8px 0; }
 .item .pin { margin-right: 4px; font-size: .9em; }
+.kt-mark { margin-left: 5px; font-size: .85em; color: var(--muted, inherit); opacity: .75; }
+.kt-badge { font-size: .8em; padding: 0 6px; border: 1px solid currentColor; border-radius: 999px; opacity: .7; white-space: nowrap; }
 .item .warn { margin-right: 4px; color: var(--danger); }
 .item mark { background: var(--accent-soft); color: inherit; border-radius: 2px; }
 .list li.group { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); padding: 10px 10px 2px; }

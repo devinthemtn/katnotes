@@ -24,6 +24,8 @@ type NotesService struct {
 	mu    sync.Mutex
 	cfg   config.Config
 	store *notes.Store
+	// startNote is the note given with --open, opened on launch.
+	startNote string
 }
 
 // Info describes where notes and options live.
@@ -534,6 +536,52 @@ func (s *NotesService) SetTaskMeta(kind, id string, line int, key, value string)
 	return st.SetTaskMeta(k, id, line, key, value)
 }
 
+// PushTask links the task on a note's body line to todo.txt (katTasks), or
+// writes its line again if it was removed there.
+func (s *NotesService) PushTask(kind, id string, line int) (*notes.Note, error) {
+	st := s.lock()
+	defer s.mu.Unlock()
+	k, err := notes.ParseKind(kind)
+	if err != nil {
+		return nil, err
+	}
+	return st.PushTask(k, id, line)
+}
+
+// TodoSync is the result of SyncTodo for the frontend.
+type TodoSync struct {
+	Enabled bool               `json:"enabled"`
+	Changes []notes.TodoChange `json:"changes"`
+	Summary string             `json:"summary"` // e.g. "2 checked, 1 orphan"
+	Notes   bool               `json:"notes"`   // some note changed: reload it
+}
+
+// SyncTodo takes tasks checked or unchecked in todo.txt (katTasks) into the
+// notes. With [todo_txt] off it does nothing and Enabled is false.
+func (s *NotesService) SyncTodo() (TodoSync, error) {
+	st := s.lock()
+	defer s.mu.Unlock()
+	if st.Todo == nil {
+		return TodoSync{Changes: []notes.TodoChange{}}, nil
+	}
+	changes, err := st.SyncTodo(false)
+	if changes == nil {
+		changes = []notes.TodoChange{}
+	}
+	return TodoSync{Enabled: true, Changes: changes, Summary: commands.SummarizeTodo(changes), Notes: commands.TodoNotesChanged(changes)}, err
+}
+
+// TodoError returns the last todo.txt sync failure since the previous call,
+// or "". Saving never fails because of one.
+func (s *NotesService) TodoError() string {
+	st := s.lock()
+	defer s.mu.Unlock()
+	if err := st.TakeTodoError(); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
 // TaskMetaStats lists the task metadata keys in use and their common values,
 // for the editor's {…} autocomplete.
 func (s *NotesService) TaskMetaStats() ([]notes.MetaKeyStat, error) {
@@ -708,6 +756,16 @@ func (s *NotesService) TouchRecent(kind, id string) {
 	if p, err := recent.Path(); err == nil {
 		recent.Touch(p, kind+"/"+id) //nolint:errcheck // a convenience
 	}
+}
+
+// StartNote is the note katnotes-gui was launched with (--open kind/id), or
+// "". It is given out once, so a reload doesn't jump back to it.
+func (s *NotesService) StartNote() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	k := s.startNote
+	s.startNote = ""
+	return k
 }
 
 // LastNote is the most recently opened note that still exists, as

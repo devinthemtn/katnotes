@@ -286,7 +286,7 @@ func (s *Store) MetaStats() ([]MetaKeyStat, error) {
 		for _, t := range n.tasks() {
 			for k, v := range t.Meta {
 				keys[k]++
-				if k == MetaDue || k == MetaStart || k == MetaDone {
+				if k == MetaDue || k == MetaStart || k == MetaDone || k == MetaLink {
 					continue
 				}
 				if vals[k] == nil {

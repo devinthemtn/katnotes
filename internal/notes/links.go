@@ -379,7 +379,7 @@ func (s *Store) Ensure(kind Kind, id, title string) (n *Note, created bool, err 
 	now := s.now()
 	n = &Note{Kind: kind, ID: id, Path: s.Path(kind, id), Title: title, Created: now, Updated: now,
 		Body: "# " + title + "\n\n"}
-	if err := s.write(n, true); err != nil {
+	if err := s.writeSynced(n, true); err != nil {
 		return nil, false, err
 	}
 	n.Snippet = snippet(n.Body)
