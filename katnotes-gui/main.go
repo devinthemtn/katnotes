@@ -4,12 +4,14 @@ package main
 
 import (
 	"embed"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
 	"runtime/debug"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/events"
 
 	"github.com/devinthemtn/katnotes/internal/config"
 )
@@ -65,7 +67,7 @@ func main() {
 		},
 	})
 
-	app.Window.NewWithOptions(application.WebviewWindowOptions{
+	win := app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title:            "KatNotes",
 		Width:            1200,
 		Height:           780,
@@ -73,6 +75,10 @@ func main() {
 		MinHeight:        480,
 		BackgroundColour: application.NewRGB(24, 24, 32),
 		URL:              "/",
+		// Without this Wails blocks files dropped from the desktop. With it,
+		// Linux and macOS hand the drop to Go as file paths (see below), not
+		// to the page; elements need data-file-drop-target to receive one.
+		EnableFileDrop: true,
 		// Wails on Linux grabs Ctrl+Shift+Z (redo) before the page sees it,
 		// so zoom has to be bound here and handed to the frontend.
 		KeyBindings: map[string]func(window application.Window){
@@ -80,6 +86,24 @@ func main() {
 				w.ExecJS(`window.dispatchEvent(new CustomEvent("katnotes:toggle-zoom"))`)
 			},
 		},
+	})
+
+	// Files dropped on the editor: the page imports the images by path.
+	win.OnWindowEvent(events.Common.WindowFilesDropped, func(e *application.WindowEvent) {
+		ctx := e.Context()
+		drop := struct {
+			Files []string `json:"files"`
+			X     int      `json:"x"`
+			Y     int      `json:"y"`
+		}{Files: ctx.DroppedFiles()}
+		if t := ctx.DropTargetDetails(); t != nil {
+			drop.X, drop.Y = t.X, t.Y
+		}
+		detail, err := json.Marshal(drop)
+		if err != nil || len(drop.Files) == 0 {
+			return
+		}
+		win.ExecJS(fmt.Sprintf(`window.dispatchEvent(new CustomEvent("katnotes:files-dropped", {detail: %s}))`, detail))
 	})
 
 	if err := app.Run(); err != nil {

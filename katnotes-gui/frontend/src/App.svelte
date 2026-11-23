@@ -7,7 +7,7 @@
   import { metaContext, suggest, applySuggestion, shouldPairBrace, type MetaContext, type MetaStat, type Suggestion } from './metacomplete';
   import { SLASH, matchSlash, mergeSlash, slashQuery, slashToken, expandSlash, applyUserResult, caretXY, type SlashCommand } from './slash';
   import { linkQuery, linkSuggestions, linkMarkdown, linkText, applyLink, decorateLinks, keyOf, type NoteRef, type LinkSuggestion } from './links';
-  import { rewriteImageSrc, imageFiles, assetName, fileToBase64, imageInsert } from './images';
+  import { rewriteImageSrc, imageFiles, isImage, assetName, fileToBase64, imageInsert } from './images';
   import EditorMenu from './EditorMenu.svelte';
   import Backlinks from './components/Backlinks.svelte';
   import NewNoteDialog from './components/NewNoteDialog.svelte';
@@ -1827,18 +1827,46 @@
     }
   }
 
-  function onBodyDrop(e: DragEvent) {
-    const files = imageFiles(e.dataTransfer?.files);
-    if (!files.length) return;
-    e.preventDefault();
-    // Put the caret where the files were dropped, when the webview can say.
+  // Put the caret where files were dropped, when the webview can say.
+  function caretToPoint(x: number, y: number) {
     const d = document as any;
-    const pos = d.caretPositionFromPoint?.(e.clientX, e.clientY)?.offset ?? d.caretRangeFromPoint?.(e.clientX, e.clientY)?.startOffset;
+    const pos = d.caretPositionFromPoint?.(x, y)?.offset ?? d.caretRangeFromPoint?.(x, y)?.startOffset;
     if (bodyEl && typeof pos === 'number' && document.activeElement !== bodyEl) {
       bodyEl.focus();
       bodyEl.setSelectionRange(pos, pos);
     }
+  }
+
+  // Drops the page sees itself (Windows, or a plain browser in dev).
+  function onBodyDrop(e: DragEvent) {
+    const files = imageFiles(e.dataTransfer?.files);
+    if (!files.length) return;
+    e.preventDefault();
+    // Keep the Wails runtime from also sending this drop to Go.
+    e.stopPropagation();
+    caretToPoint(e.clientX, e.clientY);
     insertImages(files, false);
+  }
+
+  // Drops on Linux and macOS: Wails takes them natively and main.go passes
+  // on the file paths, which the Go side copies into assets/.
+  function onNativeDrop(e: Event) {
+    const { files, x, y } = (e as CustomEvent<{ files: string[]; x: number; y: number }>).detail;
+    const paths = files.filter((p) => isImage({ type: '', name: p }));
+    if (!paths.length) {
+      flash('drop: only image files can be added', true);
+      return;
+    }
+    if (!current) { flash('image: open a note first', true); return; }
+    caretToPoint(x, y);
+    insertAssets(paths.map((p) => async () => {
+      try {
+        return await api.ImportAsset(p);
+      } catch (err) {
+        flash(`image ${p.split('/').pop()}: ${errMsg(err)}`, true);
+        return '';
+      }
+    }));
   }
 
   let imagePicker: HTMLInputElement | undefined = $state();
@@ -1948,12 +1976,14 @@
     darkQuery.addEventListener('change', applyTheme);
     // Ctrl+Shift+Z is bound in main.go (Wails swallows it on Linux).
     window.addEventListener('katnotes:toggle-zoom', toggleZoom);
+    window.addEventListener('katnotes:files-dropped', onNativeDrop);
     window.addEventListener('beforeunload', () => { if (dirty) save(); });
     return () => {
       stopExternalWatch();
       darkQuery.removeEventListener('change', applyTheme);
       window.removeEventListener('focus', onFocus);
       window.removeEventListener('katnotes:toggle-zoom', toggleZoom);
+      window.removeEventListener('katnotes:files-dropped', onNativeDrop);
     };
   });
 </script>
@@ -2238,6 +2268,7 @@
             onpaste={onBodyPaste}
             ondragover={onBodyDragOver}
             ondrop={onBodyDrop}
+            data-file-drop-target
             onkeyup={(e) => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) { updateSlash(); updateLink(); updateMeta(); } }}
             onclick={() => { updateSlash(); updateLink(); updateMeta(); }}
             onblur={closeMenus}
