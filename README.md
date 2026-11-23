@@ -54,7 +54,7 @@ Frontmatter keys that KatNotes doesn't know are kept when a note is saved. A fil
 ```toml
 notes_dir = "~/KatNotes"
 editor = ""                 # falls back to $VISUAL, then $EDITOR, then nano/vim/vi; quotes work as in a shell, e.g. "emacsclient -nw -a ''"
-previewer = ""              # TUI "o": Markdown viewer, e.g. "katdown" or "glow -p"; empty tries katdown, glow, frogmouth, mdcat
+previewer = ""              # TUI "p" / :preview, GUI :preview window: Markdown viewer, e.g. "katdown" or "glow -p"; empty tries katdown, glow, frogmouth, mdcat
 previewer_mode = "auto"     # auto (glow/mdcat/bat/less… use the terminal, others open a window), terminal or window
 default_kind = "page"       # what `katnotes new` makes
 journal_template = "# {{.Date}}\n\n"   # fields: .Date .ID .Weekday .Time
@@ -356,6 +356,7 @@ return {
 | `rename <title>` | rename the note and update links to it |
 | `frontmatter` | edit all of the note's frontmatter as YAML (in `$EDITOR` in the TUI, in a dialog in the GUI) |
 | `open-with <program>` | open the note once in another program, e.g. `open-with code` or `open-with nvim -R`; Tab suggests the editors you have installed. Terminal programs (vim, hx, nano, glow…) take over the TUI's screen, or get a new terminal window in the GUI; window programs (code, gedit, typora…) start alongside. Quotes work as in a shell (`-a ''` is an empty argument). In the TUI a program KatNotes doesn't know (emacs, emacsclient…) gets the terminal and the GUI starts it on its own, so give it the options for each: `-nw` in the TUI, `-c` in the GUI; end the line with `&` to start it in the background instead. The GUI then watches the file while the note stays open, so changes saved in the other program appear right away; if you have unsaved edits in the GUI too, it shows the conflict bar instead of overwriting either side. `external` does the same |
+| `preview [window]` | preview the note's Markdown. TUI: opens it in `previewer` (like `p`). GUI: toggles the rendered preview pane (again to return to Edit/Split); `preview window` opens it in `previewer` instead, glow and other terminal viewers in a new terminal window |
 | `external` | open the note in `open_with`, or in the TUI `tui_open_with` if set (handled like `open-with`); with neither, the system's default app |
 | `copy-link` | copy a Markdown link to the note |
 | `link <note>` | link this note to another: adds `- [Title](../pages/id.md)` under its `## Links` heading, creating the heading at the end of the note the first time (nothing happens if the link is already there) |

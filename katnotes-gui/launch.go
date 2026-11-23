@@ -37,6 +37,20 @@ func openWith(cmdline, path string) error {
 	return launch(argv, path, detached)
 }
 
+// openPreviewer opens path in the configured Markdown previewer: a
+// terminal viewer (glow, mdcat…) in a new terminal window, anything else
+// (katdown…) detached.
+func openPreviewer(configured, mode, path string) error {
+	cmd, inTerminal, err := editor.PreviewCommand(configured, mode, path)
+	if err != nil {
+		return err
+	}
+	if inTerminal {
+		return runInTerminal(filepath.Dir(path), cmd.Args)
+	}
+	return start(cmd)
+}
+
 // openInEditor opens path in the user's editor (see editor.Resolve).
 func openInEditor(configured, path string) error {
 	argv, err := editor.Resolve(configured)

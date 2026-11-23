@@ -249,6 +249,7 @@
     { title: 'View', keys: [
       [`${modLabel}+1 … 4`, 'Pages / Journal / Tags / Tasks tab'],
       [`${modLabel}+E`, 'Cycle Edit → Split → Preview'],
+      [':preview', 'Toggle the rendered preview; :preview window opens the note in the previewer (Settings: previewer)'],
       [`${modLabel}+= / ${modLabel}+-`, 'Make text larger / smaller'],
       [`${modLabel}+0`, 'Reset text size'],
       [`${modLabel}+Shift+T`, 'All tasks from every note (Esc to go back)'],
@@ -869,6 +870,27 @@
     }
   }
 
+  // ":preview" toggles the in-app preview (back to the last edit/split
+  // view); ":preview window" opens the note in the configured previewer.
+  let viewBeforePreview: ViewMode = viewMode === 'preview' ? 'split' : viewMode;
+  async function previewNote(r: CmdResult) {
+    if (!current) { flash('no note open', true); return; }
+    if ((r.args ?? [])[0]?.toLowerCase() === 'window') {
+      await flushSave();
+      try {
+        await api.OpenPreviewer(current.kind, current.id);
+        flash(`opened ${keyOf(current)} in the previewer`);
+      } catch (e) {
+        flash(`previewer: ${errMsg(e)}`, true);
+      }
+      return;
+    }
+    if (mainView === 'note' && viewMode === 'preview') { setView(viewBeforePreview); return; }
+    if (viewMode !== 'preview') viewBeforePreview = viewMode;
+    mainView = 'note';
+    setView('preview');
+  }
+
   async function openExternal() {
     if (!current) { flash('no note open', true); return; }
     await flushSave();
@@ -928,6 +950,7 @@
   const uiActions: Record<string, (r: CmdResult) => void | Promise<void>> = {
     zoom: toggleZoom,
     external: openExternal,
+    preview: previewNote,
     terminal: openTerminal,
     config: () => editConfig(false),
     'config dir': () => editConfig(true),

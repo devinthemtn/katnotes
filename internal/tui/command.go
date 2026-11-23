@@ -50,6 +50,12 @@ var tuiActions = map[string]func(m *model, r commands.Result) tea.Cmd{
 		}
 		return nil
 	},
+	"preview": func(m *model, _ commands.Result) tea.Cmd {
+		if n := m.selected(); n != nil {
+			return m.previewCmd(n)
+		}
+		return nil
+	},
 	"open-with": func(m *model, r commands.Result) tea.Cmd {
 		if n := m.selected(); n != nil && len(r.Args) == 1 {
 			return m.openWithCmd(n, r.Args[0])

@@ -136,7 +136,7 @@
     </label>
   </div>
   <div class="row font-row">
-    <label>TUI previewer (o key)
+    <label>Previewer (TUI p key, :preview window)
       <input value={cfg.previewer ?? ''} placeholder="katdown, glow, …" onchange={(e) => onsave('previewer', val(e))} />
     </label>
     <label>…runs in

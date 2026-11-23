@@ -339,6 +339,24 @@ func (s *NotesService) OpenExternal(kind, id string) error {
 	return openExternal(cmdline, path)
 }
 
+// OpenPreviewer opens a note in the Markdown previewer from the config
+// (previewer / previewer_mode, as the TUI's "p" key does). Terminal viewers
+// such as glow run in a new terminal window.
+func (s *NotesService) OpenPreviewer(kind, id string) error {
+	st := s.lock()
+	k, err := notes.ParseKind(kind)
+	if err != nil {
+		s.mu.Unlock()
+		return err
+	}
+	path, prog, mode := st.Path(k, id), s.cfg.Previewer, s.cfg.PreviewerMode
+	s.mu.Unlock()
+	if _, err := os.Stat(path); err != nil {
+		return err
+	}
+	return openPreviewer(prog, mode, path)
+}
+
 // FileStamp identifies the current version of a note's file (its Stamp),
 // so the frontend can notice edits made by an external editor. It is ""
 // when the file is missing.
