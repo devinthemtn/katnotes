@@ -171,6 +171,16 @@ func (b *todoBatch) newID() (string, error) {
 }
 
 // HasTodoLinks reports whether body has a task with a kt: link (or kt:new).
+// hasLinkedTodo reports whether a task has a todo.txt ID ({kt:new} doesn't).
+func hasLinkedTodo(tasks []Task) bool {
+	for _, t := range tasks {
+		if v := linkValue(t); v != "" && v != linkNew {
+			return true
+		}
+	}
+	return false
+}
+
 func HasTodoLinks(body string) bool {
 	if !strings.Contains(body, MetaLink+":") {
 		return false
@@ -183,17 +193,19 @@ func HasTodoLinks(body string) bool {
 	return false
 }
 
-// todoLinks counts the note's tasks linked to todo.txt (kt:new included).
-func (n *Note) todoLinks() int { return countTodoLinks(n.tasks()) }
-
-func countTodoLinks(ts []Task) int {
-	c := 0
+// countTodoLinks counts ts's tasks linked to todo.txt (kt:new included),
+// and those that could be: the linked ones plus the open ones.
+func countTodoLinks(ts []Task) (linked, linkable int) {
 	for _, t := range ts {
-		if linkValue(t) != "" {
-			c++
+		l := linkValue(t) != ""
+		if l {
+			linked++
+		}
+		if l || !t.Done {
+			linkable++
 		}
 	}
-	return c
+	return linked, linkable
 }
 
 // linkValue is the task's kt: value if it is a valid ID or "new".
@@ -528,7 +540,15 @@ func (s *Store) PushTask(kind Kind, id string, line int) (*Note, error) {
 	if task == nil {
 		return nil, ErrTaskMoved
 	}
-	if v := linkValue(*task); v != "" && v != linkNew {
+	v := linkValue(*task)
+	if v == linkNew {
+		// Saved as {kt:new} while sync was off: saving now links it.
+		if err := s.Save(n); err != nil {
+			return nil, err
+		}
+		return n, nil
+	}
+	if v != "" {
 		// Forget the last sync so push writes the line again if it is gone.
 		if err := s.Todo.forget(v); err != nil {
 			return nil, err
@@ -539,6 +559,47 @@ func (s *Store) PushTask(kind Kind, id string, line int) (*Note, error) {
 		return n, nil
 	}
 	return s.SetTaskMeta(kind, id, line, MetaLink, linkNew)
+}
+
+// PushAllTasks links every open task in the note that isn't linked to
+// todo.txt yet, in one save; done tasks are left alone. It returns how many
+// tasks it linked.
+func (s *Store) PushAllTasks(kind Kind, id string) (*Note, int, error) {
+	if s.Todo == nil {
+		return nil, 0, errTodoOff
+	}
+	n, err := s.Get(kind, id)
+	if err != nil {
+		return nil, 0, err
+	}
+	lines := strings.Split(n.Body, "\n")
+	count := 0
+	for _, t := range ParseTasks(n.Body) {
+		switch linkValue(t) {
+		case "":
+			if t.Done {
+				continue
+			}
+			cr := strings.HasSuffix(lines[t.Line], "\r")
+			l, _ := SetLineMeta(strings.TrimSuffix(lines[t.Line], "\r"), MetaLink, linkNew)
+			if cr {
+				l += "\r"
+			}
+			lines[t.Line] = l
+			count++
+		case linkNew:
+			// Saved as {kt:new} while sync was off: saving now links it.
+			count++
+		}
+	}
+	if count == 0 {
+		return n, 0, nil
+	}
+	n.Body = strings.Join(lines, "\n")
+	if err := s.Save(n); err != nil {
+		return nil, 0, err
+	}
+	return n, count, nil
 }
 
 func (t *TodoSync) forget(id string) error {

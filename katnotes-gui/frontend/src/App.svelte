@@ -3,7 +3,7 @@
   import { marked } from 'marked';
   import { highlightExtension } from './highlight';
   import DOMPurify from 'dompurify';
-  import { checkboxHTML, decorateTasks, toggleTask, makeTask, continueList, setTaskLine, setTaskMetaLine, metaChips, setStampDone, dateState, today, ensureMetaBlock } from './tasks';
+  import { checkboxHTML, decorateTasks, taskLinks, taskLines, stripMeta, TASK_LINE, toggleTask, makeTask, continueList, setTaskLine, setTaskMetaLine, metaChips, setStampDone, dateState, today, ensureMetaBlock } from './tasks';
   import { metaContext, suggest, setTodoLinks, applySuggestion, shouldPairBrace, type MetaContext, type MetaStat, type Suggestion } from './metacomplete';
   import { SLASH, matchSlash, mergeSlash, slashQuery, slashToken, expandSlash, applyUserResult, caretXY, type SlashCommand } from './slash';
   import { linkQuery, linkSuggestions, linkMarkdown, linkText, applyLink, decorateLinks, keyOf, type NoteRef, type LinkSuggestion } from './links';
@@ -15,6 +15,7 @@
   import FrontmatterDialog from './components/FrontmatterDialog.svelte';
   import HelpDialog from './components/HelpDialog.svelte';
   import SettingsDialog from './components/SettingsDialog.svelte';
+  import TodoSetupDialog from './components/TodoSetupDialog.svelte';
   import GraphView from './components/GraphView.svelte';
   // The app icon (build/appicon.svg), shown in the help window.
   import { Browser, Clipboard } from '@wailsio/runtime';
@@ -84,6 +85,9 @@
   let deleteOpen = $state(false);
   let settingsOpen = $state(false);
   let helpOpen = $state(false);
+  let todoSetupOpen = $state(false);
+  // Run after todo.txt sync is turned on from the setup dialog.
+  let todoSetupThen: (() => void) | null = null;
   let zoomed = $state(false);
 
   // command palette
@@ -290,6 +294,10 @@
     return String(e);
   }
   function flash(msg: string, isErr = false) {
+    if (isErr && msg.includes('todo.txt sync is off')) {
+      openTodoSetup();
+      return;
+    }
     status = msg;
     statusErr = isErr;
     if (!isErr) setTimeout(() => { if (status === msg) status = ''; }, 3000);
@@ -300,7 +308,7 @@
     rewriteImageSrc(
       DOMPurify.sanitize(
         decorateLinks(
-          decorateTasks(marked.parse(draftBody, { async: false, gfm: true, breaks: false }) as string),
+          decorateTasks(marked.parse(draftBody, { async: false, gfm: true, breaks: false }) as string, todoEnabled ? taskLinks(draftBody) : undefined),
           (current as Note | null)?.kind ?? 'page',
           (kind, id) => linkKeys.has(`${kind}/${id}`),
         ),
@@ -382,7 +390,9 @@
     saveTimer = setTimeout(() => save(), 800);
   }
 
-  async function save(force = false) {
+  // Resolves to the todo.txt sync error ('' for none) once the note is
+  // saved, or undefined when nothing was saved.
+  async function save(force = false): Promise<string | undefined> {
     clearTimeout(saveTimer);
     if (!current || (!dirty && !force)) return;
     // The file changed underneath us: only "Keep mine" may overwrite it.
@@ -403,10 +413,12 @@
         conflict = false;
         saveState = 'saved';
       }
-      api.TodoError().then((m) => { if (m) flash(m, true); });
+      const todoErr = (await api.TodoError()) ?? '';
+      if (todoErr) flash(todoErr, true);
       await refreshList();
       loadMetaStats();
       loadBacklinks();
+      return todoErr;
     } catch (e) {
       const msg = errMsg(e);
       saveState = 'error';
@@ -448,20 +460,108 @@
     }
   }
 
+  // Explain todo.txt sync and offer to turn it on; then() runs once it is.
+  function openTodoSetup(then: (() => void) | null = null) {
+    todoSetupThen = then;
+    todoSetupOpen = true;
+  }
+  async function enableTodo(file: string) {
+    todoSetupOpen = false;
+    const then = todoSetupThen;
+    todoSetupThen = null;
+    if (file !== (cfg?.todo_txt?.file ?? '')) await saveSetting('todo_txt.file', file);
+    await saveSetting('todo_txt.enabled', 'true');
+    if (todoEnabled && then) then();
+  }
+
   // Link a task to katTasks, or write its todo.txt line again.
   async function pushTaskIn(nt: NoteTasks, t: Task) {
-    const linked = t.meta?.kt && t.meta.kt !== 'new';
-    if (!linked) return setTaskMetaIn(nt, t, 'kt', 'new');
+    if (!todoEnabled) return openTodoSetup(() => pushTaskIn(nt, t));
+    const linked = isLinked(t);
+    const done = linked ? 'written to todo.txt again' : 'linked to katTasks (todo.txt)';
     try {
+      if (!linked && current && keyOf(current) === keyOf(nt.note)) {
+        // Open in the editor: add {kt:new} to the draft and save now, so
+        // the task gets its ID and todo.txt line at once.
+        if (!(await setTaskMetaIn(nt, t, 'kt', 'new'))) return;
+        if (conflict) return flash('not linked: the note changed outside the app; resolve that first', true);
+        if (dirty) {
+          const err = await save();
+          if (err === undefined) return; // save failed and said why
+          if (!err) flash(done);
+          return;
+        }
+        // {kt:new} was already saved (while sync was off): PushTask links it.
+      }
       await flushSave();
-      await api.PushTask(nt.note.kind, nt.note.id, t.line);
+      const n = await api.PushTask(nt.note.kind, nt.note.id, t.line);
+      // Our own write isn't an external edit.
+      if (n && current && keyOf(current) === keyOf(n) && !dirty) {
+        if (extWatch?.key === keyOf(n)) extWatch.stamp = n.stamp ?? extWatch.stamp;
+        adoptBody(n.body);
+        current = { ...n, body: draftBody };
+      }
       const m = await api.TodoError();
-      flash(m || 'written to todo.txt', !!m);
+      flash(m || done, !!m);
+      taskNotes = (await api.Tasks()) ?? [];
+      await refreshList();
     } catch (e) {
       flash(errMsg(e), true);
     }
   }
+  // The header's ⇄ button: link every open task in the open note to
+  // katTasks. It counts linked tasks and open ones (done unlinked tasks are
+  // skipped, as PushAllTasks does).
+  let noteTaskCounts = $derived.by(() => {
+    if (!current) return { tasks: 0, linked: 0 };
+    const lines = draftBody.split('\n');
+    const links = taskLinks(draftBody);
+    let tasks = 0, linked = 0;
+    taskLines(draftBody).forEach((i, k) => {
+      const isLinkedTask = !!links[k] && links[k] !== 'new';
+      const done = /x/i.test(lines[i].match(TASK_LINE)?.[2] ?? '');
+      if (isLinkedTask) linked++;
+      if (isLinkedTask || !done) tasks++;
+    });
+    return { tasks, linked };
+  });
+  let noteTaskCount = $derived(noteTaskCounts.tasks);
+  let noteLinkedCount = $derived(noteTaskCounts.linked);
+  async function linkAllTasks() {
+    if (!current) return;
+    if (!todoEnabled) return openTodoSetup(() => linkAllTasks());
+    if (conflict) return flash('not linked: the note changed outside the app; resolve that first', true);
+    const count = noteTaskCount - noteLinkedCount;
+    try {
+      await flushSave();
+      const n = await api.PushAllTasks(current.kind, current.id);
+      // Our own write isn't an external edit.
+      if (n && current && keyOf(current) === keyOf(n) && !dirty) {
+        if (extWatch?.key === keyOf(n)) extWatch.stamp = n.stamp ?? extWatch.stamp;
+        adoptBody(n.body);
+        current = { ...n, body: draftBody };
+      }
+      const m = await api.TodoError();
+      flash(m || `linked ${count} task(s) to katTasks (todo.txt)`, !!m);
+      taskNotes = (await api.Tasks()) ?? [];
+      await refreshList();
+    } catch (e) {
+      flash(errMsg(e), true);
+    }
+  }
+  // The preview's ⇄ on task n (in taskLines order) of the open note.
+  async function linkPreviewTask(n: number) {
+    if (!current) return;
+    const line = taskLines(draftBody)[n];
+    if (line === undefined) return;
+    const text = stripMeta(draftBody.split('\n')[line].replace(TASK_LINE, '').trim());
+    const kt = taskLinks(draftBody)[n];
+    await pushTaskIn({ note: current } as NoteTasks, { line, text, meta: kt ? { kt } : {} } as unknown as Task);
+  }
 
+  function isLinked(t: Task): boolean {
+    return !!t.meta?.kt && t.meta.kt !== 'new';
+  }
   async function flushSave() {
     if (dirty && !conflict) await save();
   }
@@ -1197,6 +1297,12 @@
       r = await api.RunCommand(line, current?.kind ?? '', current?.id ?? '', searchMode, query);
     } catch (e) {
       if (spec?.long) { flash(errMsg(e), true); return; }
+      if (errMsg(e).includes('todo.txt sync is off')) {
+        // :push-task, :import-task, :sync-todo: offer to turn it on, then run it.
+        await closePalette();
+        openTodoSetup(() => openPalette().then(() => setCmdInput(line)));
+        return;
+      }
       // Keep the palette open with the line, so it can be fixed.
       cmdInput = line;
       cmdErr = errMsg(e);
@@ -1482,13 +1588,14 @@
   }
 
   // Set one metadata key on a task from the all-tasks view ('' removes it).
-  async function setTaskMetaIn(nt: NoteTasks, t: Task, key: string, value: string) {
+  // Resolves to false when the task couldn't be changed (already flashed).
+  async function setTaskMetaIn(nt: NoteTasks, t: Task, key: string, value: string): Promise<boolean> {
     if (current && keyOf(current) === keyOf(nt.note)) {
       const next = setTaskMetaLine(draftBody, t.line, key, value, t.text);
       if (next === null) {
         flash('that task moved in the editor; list refreshed', true);
         await refreshList();
-        return;
+        return false;
       }
       draftBody = next;
       onEdit();
@@ -1496,13 +1603,15 @@
       if (value) m[key] = value;
       else delete m[key];
       t.meta = m;
-      return;
+      return true;
     }
     try {
       await api.SetTaskMeta(nt.note.kind, nt.note.id, t.line, key, value);
       taskNotes = (await api.Tasks()) ?? [];
+      return true;
     } catch (e) {
       flash(errMsg(e), true);
+      return false;
     }
   }
   function cyclePri(nt: NoteTasks, t: Task) {
@@ -1534,8 +1643,8 @@
   function onKey(e: KeyboardEvent) {
     const mod = e.ctrlKey || e.metaKey;
     if (e.key === 'Escape') {
-      if (newOpen || deleteOpen || settingsOpen || helpOpen || cmdOpen || fmEditOpen) {
-        newOpen = deleteOpen = settingsOpen = helpOpen = cmdOpen = fmEditOpen = false;
+      if (newOpen || deleteOpen || settingsOpen || helpOpen || cmdOpen || fmEditOpen || todoSetupOpen) {
+        newOpen = deleteOpen = settingsOpen = helpOpen = cmdOpen = fmEditOpen = todoSetupOpen = false;
         e.preventDefault();
       } else if (mainView === 'tasks' || mainView === 'graph') {
         mainView = 'note';
@@ -1556,7 +1665,7 @@
       return;
     }
     // The TUI's single keys, when not typing in a field.
-    const dialog = newOpen || deleteOpen || settingsOpen || helpOpen || cmdOpen || fmEditOpen;
+    const dialog = newOpen || deleteOpen || settingsOpen || helpOpen || cmdOpen || fmEditOpen || todoSetupOpen;
     if (!mod && !e.altKey && !dialog && !isTyping(e.target)) {
       const bare: Record<string, () => void> = {
         '/': () => { searchEl?.focus(); searchEl?.select(); },
@@ -1855,6 +1964,11 @@
     if (!cmd.user) {
       const r = expandSlash(l.text, l.col, cmd);
       if (r) replaceRange(l.start, l.end, r.line, l.start + r.col)?.then(() => { if (cmd.meta) updateMeta(); });
+      // {kt:new} links on save, so only once todo.txt sync is on.
+      if (cmd.meta === 'kt' && !todoEnabled) openTodoSetup(() => {
+        const n = taskLinks(draftBody).indexOf('new');
+        if (n >= 0) linkPreviewTask(n);
+      });
       return;
     }
     const tok = slashToken(l.text, l.col);
@@ -2019,6 +2133,12 @@
       else if (href) flash(`can't open ${href}`, true);
       return;
     }
+    const kb = (e.target as HTMLElement).closest?.('button.kt-link') as HTMLElement | null;
+    if (kb) {
+      e.preventDefault();
+      linkPreviewTask(Number(kb.dataset.ktTask));
+      return;
+    }
     const el = e.target as HTMLElement;
     if (!(el instanceof HTMLInputElement) || !el.classList.contains('task')) return;
     e.preventDefault();
@@ -2095,6 +2215,14 @@
   });
 </script>
 
+<!-- ⇄ after a note's title: ✓ when all its open or linked tasks are linked to katTasks, else n/m. -->
+{#snippet ktMark(n: Note)}
+  {#if n.todoLinks}
+    {@const all = n.todoLinks >= (n.todoTasks ?? 0)}
+    <span class="kt-mark" class:linked={all} title={all ? `All ${n.todoLinks} open or linked task(s) linked to katTasks (todo.txt)` : `${n.todoLinks} of ${n.todoTasks} task(s) linked to katTasks (todo.txt)`}>⇄{#if all} ✓{:else} {n.todoLinks}/{n.todoTasks}{/if}</span>
+  {/if}
+{/snippet}
+
 <svelte:window onkeydown={onKey} />
 
 <div class="app" class:zoomed>
@@ -2169,7 +2297,7 @@
               class:active={mainView === 'note' && current && keyOf(current) === keyOf(nt.note)}
               onclick={() => open(nt.note.kind, nt.note.id)}
             >
-              <span class="title">{nt.note.title}</span>
+              <span class="title">{nt.note.title}{@render ktMark(nt.note)}</span>
               <span class="meta">
                 <span class="task-count" class:none-open={!nt.open}>{nt.open} open · {nt.done} done</span>
                 {nt.note.kind === 'journal' ? nt.note.id : nt.note.kind}
@@ -2213,7 +2341,7 @@
               onclick={() => open(n.kind, n.id)}
             >
               <!-- Same rows as the TUI list: dates line, then tags; a search adds the hit. -->
-              <span class="title">{#if n.problem}<span class="warn" title={n.problem}>⚠</span>{/if}{#if n.extra?.pinned === true}<span class="pin" title="pinned">📌</span>{/if}{#each hlChars(n.title, m?.nameHits) as sg}{#if sg.on}<mark>{sg.t}</mark>{:else}{sg.t}{/if}{/each}{#if n.todoLinks}<span class="kt-mark" title="{n.todoLinks} task(s) linked to katTasks (todo.txt)">⇄</span>{/if}</span>
+              <span class="title">{#if n.problem}<span class="warn" title={n.problem}>⚠</span>{/if}{#if n.extra?.pinned === true}<span class="pin" title="pinned">📌</span>{/if}{#each hlChars(n.title, m?.nameHits) as sg}{#if sg.on}<mark>{sg.t}</mark>{:else}{sg.t}{/if}{/each}{@render ktMark(n)}</span>
               {#if n.kind === 'journal'}
                 <span class="meta">{n.id}{#each n.tags ?? [] as t}<span class="tag">#{t}</span>{/each}</span>
               {:else}
@@ -2282,9 +2410,7 @@
               <input type="date" class="task-due" value={t.meta?.due ?? ''} title="Due date" aria-label="Due date"
                 onchange={(e) => setTaskMetaIn(nt, t, 'due', (e.currentTarget as HTMLInputElement).value)} />
               <button class="task-pri" onclick={() => cyclePri(nt, t)} title="Priority: none → high → med → low">!</button>
-              {#if todoEnabled}
-                <button class="task-pri" onclick={() => pushTaskIn(nt, t)} title={t.meta?.kt && t.meta.kt !== 'new' ? 'Linked to katTasks: write its todo.txt line again' : 'Link to katTasks (todo.txt)'}>⇄</button>
-              {/if}
+              <button class="task-pri task-kt" class:linked={isLinked(t)} onclick={() => pushTaskIn(nt, t)} title={!todoEnabled ? 'Link to katTasks (todo.txt): turned off; click to set it up' : isLinked(t) ? `Linked to katTasks (kt:${t.meta?.kt}): click to write its todo.txt line again` : 'Link to katTasks (todo.txt)'}>⇄{#if isLinked(t)} ✓{/if}</button>
             </span>
           </li>
         {/snippet}
@@ -2299,7 +2425,7 @@
           {#each taskGroups as g (keyOf(g.nt.note))}
             <div class="task-group">
               <button class="task-note" onclick={() => open(g.nt.note.kind, g.nt.note.id)}>
-                {g.nt.note.title}{#if g.nt.note.todoLinks}<span class="kt-mark" title="{g.nt.note.todoLinks} task(s) linked to katTasks (todo.txt)">⇄</span>{/if}
+                {g.nt.note.title}{@render ktMark(g.nt.note)}
                 <span class="task-note-meta">{g.nt.note.kind === 'journal' ? g.nt.note.id : 'page'} · {g.nt.open} open · {g.nt.done} done</span>
               </button>
               <ul>
@@ -2328,7 +2454,12 @@
         />
         <div class="head-row">
           <span class="kind">{current.kind}/{current.id}</span>
-          {#if current.todoLinks}<span class="kt-badge" title="{current.todoLinks} task(s) linked to katTasks (todo.txt)">⇄ katTasks {current.todoLinks}</span>{/if}
+          {#if noteTaskCount && (todoEnabled || current.todoLinks)}
+            {@const all = noteLinkedCount === noteTaskCount}
+            <button class="kt-badge" class:linked={all} disabled={all} onclick={linkAllTasks}
+              title={all ? `All ${noteTaskCount} open or linked task(s) linked to katTasks (todo.txt)` : `${noteLinkedCount} of ${noteTaskCount} task(s) linked to katTasks: click to link the open ones (done tasks are skipped)`}
+            >⇄ katTasks {#if all}✓{:else}{noteLinkedCount}/{noteTaskCount}{/if}</button>
+          {/if}
           <input
             class="tags-input"
             bind:this={tagsEl}
@@ -2529,6 +2660,11 @@
 
 {#if helpOpen}
   <HelpDialog sections={helpSections} catalog={cmdCatalog} {cmdKeys} {version} onclose={() => (helpOpen = false)} />
+{/if}
+
+{#if todoSetupOpen}
+  <TodoSetupDialog file={cfg?.todo_txt?.file ?? ''} onenable={enableTodo}
+    onclose={() => { todoSetupOpen = false; todoSetupThen = null; }} />
 {/if}
 
 {#if settingsOpen && cfg}

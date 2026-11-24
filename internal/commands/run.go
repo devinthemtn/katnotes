@@ -457,6 +457,21 @@ func runPushTask(env *Env, args []string) (Result, error) {
 	return Result{Note: n, Changed: true, Status: status}, nil
 }
 
+func runPushTasks(env *Env, _ []string) (Result, error) {
+	n, count, err := env.Store.PushAllTasks(env.Note.Kind, env.Note.ID)
+	if err != nil {
+		return Result{}, err
+	}
+	if count == 0 {
+		return Result{Note: n, Status: "every open task in " + n.Key() + " is already linked to todo.txt"}, nil
+	}
+	status := fmt.Sprintf("linked %d task(s) in %s to todo.txt", count, n.Key())
+	if e := env.Store.TakeTodoError(); e != nil {
+		status = e.Error()
+	}
+	return Result{Note: n, Changed: true, Status: status}, nil
+}
+
 func runImportTask(env *Env, args []string) (Result, error) {
 	n := env.Note
 	if n == nil {

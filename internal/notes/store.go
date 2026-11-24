@@ -109,6 +109,10 @@ type Note struct {
 	// TodoLinks is how many of the note's tasks are linked to todo.txt
 	// (katTasks) with {kt:…}, for the apps' ⇄ mark.
 	TodoLinks int `json:"todoLinks,omitempty"`
+	// TodoTasks is how many of its tasks could be linked: the linked ones
+	// plus the open ones (done unlinked tasks are skipped). When it equals
+	// TodoLinks every task is linked; the apps show ⇄ ✓ rather than ⇄ n/m.
+	TodoTasks int `json:"todoTasks,omitempty"`
 
 	d *derived // links, tasks and lowercased body (see cache.go)
 }
@@ -239,7 +243,7 @@ func (s *Store) load(kind Kind, id, path string) (*Note, error) {
 		return nil, err
 	}
 	if n, ok := s.cache.get(path, fi); ok {
-		n.TodoLinks = n.todoLinks()
+		n.TodoLinks, n.TodoTasks = countTodoLinks(n.tasks())
 		return n, nil
 	}
 	data, err := os.ReadFile(path)
@@ -279,7 +283,7 @@ func (s *Store) load(kind Kind, id, path string) (*Note, error) {
 	n.Snippet = snippet(n.Body)
 	n.Stamp = FileStamp(fi)
 	n.d = &derived{body: n.Body}
-	n.TodoLinks = n.todoLinks()
+	n.TodoLinks, n.TodoTasks = countTodoLinks(n.tasks())
 	s.cache.put(path, fi, n)
 	return n, nil
 }
@@ -591,7 +595,7 @@ func (s *Store) createJournal(d time.Time, tags []string, body string) (*Note, e
 		}
 		n.Body = t.Body
 		n.Tags = NormalizeTags(append(n.Tags, t.Tags...))
-		for _, k := range []string{"created", "updated", TaskKey} {
+		for _, k := range []string{"created", "updated", TaskKey, TodoLinkKey} {
 			delete(t.Extra, k)
 		}
 		n.Extra = t.Extra
@@ -764,7 +768,7 @@ func (s *Store) write(n *Note, exclusive bool) error {
 		}
 	}
 	syncTaskFlag(n)
-	n.TodoLinks = countTodoLinks(ParseTasks(n.Body))
+	n.TodoLinks, n.TodoTasks = countTodoLinks(ParseTasks(n.Body))
 	data, err := encodeNote(n)
 	if err != nil {
 		return err

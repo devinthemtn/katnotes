@@ -40,3 +40,23 @@ test('continueList', () => {
   assert.equal(enter('text|'), null);
   assert.equal(enter('- [| ] milk'), null);
 });
+
+test('taskLinks and the preview katTasks buttons', async () => {
+  const { decorateTasks, taskLinks } = await import('./tasks.ts');
+  const body = '- [ ] plain\n- [x] new one {kt:new}\n- [ ] linked {due:2026-11-27 kt:7f3a2c}\n';
+  assert.deepEqual(taskLinks(body), ['', 'new', '7f3a2c']);
+  const html =
+    '<ul>\n<li><input type="checkbox" class="task"> plain</li>\n' +
+    '<li><input type="checkbox" class="task" checked> new one {kt:new}</li>\n' +
+    '<li><input type="checkbox" class="task"> linked {due:2026-11-27 kt:7f3a2c}</li>\n</ul>\n';
+  const out = decorateTasks(html, taskLinks(body));
+  assert.match(out, /plain <button type="button" class="kt-link" data-kt-task="0"[^>]*>⇄<\/button><\/li>/);
+  assert.match(out, /new one <button type="button" class="kt-link pending" data-kt-task="1"/);
+  assert.match(out, /class="kt-link linked" data-kt-task="2" title="Linked to katTasks \(kt:7f3a2c\)/);
+  assert.doesNotMatch(out, /meta-kt/); // the button replaces the kt chip
+  assert.match(out, /meta-due/);
+  // Sync off: no buttons, the chip stays.
+  const off = decorateTasks(html);
+  assert.doesNotMatch(off, /kt-link/);
+  assert.match(off, /meta-kt/);
+});

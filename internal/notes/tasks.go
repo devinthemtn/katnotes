@@ -13,6 +13,17 @@ import (
 // Markdown task ("- [ ] …" or "- [x] …"). It is removed when the last task is.
 const TaskKey = "contains_task"
 
+// TodoLinkKey is the frontmatter key set to true while a note has a task
+// linked to todo.txt for katTasks ({kt:<id>}; not {kt:new}, which has no
+// line yet). It is removed when the last link is.
+const TodoLinkKey = "kattasks"
+
+// IsAutoField reports whether a frontmatter key is kept up to date from the
+// body (contains_task, kattasks) rather than set by hand.
+func IsAutoField(key string) bool {
+	return key == TaskKey || key == TodoLinkKey
+}
+
 // taskLine matches a task marker at the start of a line, optionally inside a
 // blockquote and/or list item. It mirrors the GUI's frontend/src/tasks.ts.
 // Groups: 1 = everything before the box, 2 = the mark, 3 = the task text.
@@ -179,18 +190,31 @@ func (s *Store) editTaskLine(kind Kind, id string, line int, edit func(string) s
 	return n, nil
 }
 
-// syncTaskFlag sets or clears the contains_task frontmatter key from the body.
+// syncTaskFlag sets or clears the contains_task and kattasks frontmatter
+// keys from the body.
 func syncTaskFlag(n *Note) {
-	if HasTask(n.Body) {
-		n.extra()[TaskKey] = true
+	tasks := ParseTasks(n.Body)
+	setFlag(n, TaskKey, len(tasks) > 0)
+	setFlag(n, TodoLinkKey, hasLinkedTodo(tasks))
+}
+
+func setFlag(n *Note, key string, on bool) {
+	if on {
+		n.extra()[key] = true
 		return
 	}
 	if n.Extra != nil {
-		delete(n.Extra, TaskKey)
+		delete(n.Extra, key)
 		if len(n.Extra) == 0 {
 			n.Extra = nil
 		}
 	}
+}
+
+// flagOK reports whether frontmatter key matches want (true, or absent).
+func flagOK(n *Note, key string, want bool) bool {
+	v, present := n.Extra[key]
+	return (want && v == true) || (!want && !present)
 }
 
 // FileLine converts a 0-based body line of a note into a 1-based line number
@@ -208,16 +232,18 @@ func (s *Store) FileLine(kind Kind, id string, bodyLine int) int {
 	return 2 + strings.Count(string(header), "\n") + bodyLine + 1
 }
 
-// TaskFlagChange is a note whose contains_task flag SyncTaskFlags changed.
+// TaskFlagChange is a note whose contains_task or kattasks flag
+// SyncTaskFlags changed; the fields are the new values.
 type TaskFlagChange struct {
 	Kind         Kind   `json:"kind"`
 	ID           string `json:"id"`
 	Path         string `json:"path"`
 	ContainsTask bool   `json:"contains_task"`
+	Kattasks     bool   `json:"kattasks"`
 }
 
 // SyncTaskFlags rescans every note and sets or removes the contains_task
-// frontmatter key to match its body. Only notes whose flag is wrong are
+// and kattasks frontmatter keys to match its body. Only notes whose flag is wrong are
 // rewritten, and their updated time is left alone. With dryRun nothing is
 // written; the changes that would be made are still returned.
 func (s *Store) SyncTaskFlags(dryRun bool) ([]TaskFlagChange, error) {
@@ -228,12 +254,12 @@ func (s *Store) SyncTaskFlags(dryRun bool) ([]TaskFlagChange, error) {
 	var out []TaskFlagChange
 	for i := range ns {
 		n := &ns[i]
-		want := len(n.tasks()) > 0
-		v, present := n.Extra[TaskKey]
-		if (want && v == true) || (!want && !present) {
+		tasks := n.tasks()
+		want, linked := len(tasks) > 0, hasLinkedTodo(tasks)
+		if flagOK(n, TaskKey, want) && flagOK(n, TodoLinkKey, linked) {
 			continue
 		}
-		out = append(out, TaskFlagChange{Kind: n.Kind, ID: n.ID, Path: n.Path, ContainsTask: want})
+		out = append(out, TaskFlagChange{Kind: n.Kind, ID: n.ID, Path: n.Path, ContainsTask: want, Kattasks: linked})
 		if dryRun {
 			continue
 		}

@@ -110,13 +110,17 @@ func (i noteItem) Title() string {
 	return t + todoMark(&i.n)
 }
 
-// todoMark is " ⇄" after the title of a note with tasks linked to todo.txt
-// (katTasks), or "".
+// todoMark goes after the title of a note with tasks linked to todo.txt
+// (katTasks): " ⇄ ✓" when all its open or linked tasks are, else " ⇄ n/m";
+// "" when none are.
 func todoMark(n *notes.Note) string {
 	if n.TodoLinks == 0 {
 		return ""
 	}
-	return " ⇄"
+	if n.TodoLinks >= n.TodoTasks {
+		return " ⇄ ✓"
+	}
+	return fmt.Sprintf(" ⇄ %d/%d", n.TodoLinks, n.TodoTasks)
 }
 
 // Description is the lines under the title (the GUI sidebar shows the same):

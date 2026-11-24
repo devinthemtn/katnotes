@@ -225,3 +225,102 @@ func TestTodoKeepsKatTasksOrder(t *testing.T) {
 		t.Errorf("todo.txt = %q", readFile(t, todo))
 	}
 }
+
+func TestKattasksFrontmatter(t *testing.T) {
+	s, _ := newTodoStore(t)
+	n, err := s.Create(KindPage, "Flags", nil, "- [ ] plain\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := func() string { return readFile(t, s.Path(KindPage, "flags")) }
+	if strings.Contains(raw(), TodoLinkKey+":") {
+		t.Fatalf("kattasks set without a link:\n%s", raw())
+	}
+
+	// Linked on save: the flag follows.
+	n.Body = "- [ ] plain {kt:new}\n"
+	if err := s.Save(n); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(raw(), "kattasks: true\n") {
+		t.Fatalf("kattasks not set:\n%s", raw())
+	}
+
+	// Link removed: so is the flag; contains_task stays.
+	n.Body = "- [ ] plain\n"
+	if err := s.Save(n); err != nil {
+		t.Fatal(err)
+	}
+	if got := raw(); strings.Contains(got, TodoLinkKey+":") || !strings.Contains(got, "contains_task: true\n") {
+		t.Fatalf("after unlinking:\n%s", got)
+	}
+
+	// {kt:new} with sync off has no todo.txt line yet: no flag.
+	s.Todo = nil
+	n.Body = "- [ ] plain {kt:new}\n"
+	if err := s.Save(n); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(raw(), TodoLinkKey+":") {
+		t.Fatalf("kattasks set for kt:new:\n%s", raw())
+	}
+
+	// A file written elsewhere with a link but no flag: SyncTaskFlags backfills it.
+	os.WriteFile(s.Path(KindPage, "other"), []byte("---\ntitle: Other\ncontains_task: true\n---\n- [ ] x {kt:abc123}\n"), 0o644)
+	changes, err := s.SyncTaskFlags(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changes) != 1 || changes[0].ID != "other" || !changes[0].Kattasks {
+		t.Fatalf("changes = %+v", changes)
+	}
+	if !strings.Contains(readFile(t, s.Path(KindPage, "other")), "kattasks: true\n") {
+		t.Fatal("backfill didn't set kattasks")
+	}
+}
+
+// A task saved as {kt:new} while sync was off is linked by push.
+func TestPushSavedKtNew(t *testing.T) {
+	s, dir := newTodoStore(t)
+	todo := s.Todo
+	s.Todo = nil
+	if _, err := s.Create(KindPage, "Later", nil, "- [ ] do it {kt:new}\n"); err != nil {
+		t.Fatal(err)
+	}
+	s.Todo = todo
+	n, err := s.PushTask(KindPage, "later", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := linkedID(t, n.Body)
+	if got := readFile(t, filepath.Join(dir, "todo.txt")); !strings.Contains(got, "do it kn:"+id+" note:page/later") {
+		t.Fatalf("todo.txt = %q", got)
+	}
+}
+
+func TestPushAllTasks(t *testing.T) {
+	s, dir := newTodoStore(t)
+	n, err := s.Create(KindPage, "Chores", nil, "# Chores\n\n- [ ] one\n- [ ] two {due:2026-11-20}\nnot a task\n- [x] three\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	n, count, err := s.PushAllTasks(KindPage, n.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 2 || n.TodoLinks != 2 {
+		t.Fatalf("count = %d, TodoLinks = %d, want 2: %q", count, n.TodoLinks, n.Body)
+	}
+	if !strings.Contains(n.Body, "- [x] three\n") {
+		t.Errorf("done task was linked: %q", n.Body)
+	}
+	if strings.Contains(n.Body, "kt:new") {
+		t.Errorf("kt:new left in body: %q", n.Body)
+	}
+	if got := strings.Count(readFile(t, filepath.Join(dir, "todo.txt")), "note:page/chores"); got != 2 {
+		t.Errorf("todo.txt has %d linked lines, want 2", got)
+	}
+	if _, count, _ = s.PushAllTasks(KindPage, n.ID); count != 0 {
+		t.Errorf("second push linked %d, want 0", count)
+	}
+}

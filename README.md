@@ -119,7 +119,7 @@ Notes are cached by file time and size, along with their parsed links and tasks,
 
 Markdown tasks (`- [ ] buy milk`, `- [x] done`) are plain GFM, so they work in any Markdown editor. KatNotes adds:
 
-- `contains_task: true` in a note's frontmatter while it has tasks. It is kept up to date on every save; `katnotes tasks sync` backfills notes written by other tools.
+- `contains_task: true` in a note's frontmatter while it has tasks, and `kattasks: true` while one of them is linked to todo.txt (see [Tasks in katTasks](#tasks-in-kattasks-todotxt)). Both are kept up to date on every save; `katnotes tasks sync` backfills notes written by other tools.
 - A Tasks tab in the TUI and GUI listing notes with tasks, and a view of every task across notes.
 
 ### Task metadata
@@ -150,7 +150,7 @@ Any other key (e.g. `project:house`) is kept and can be filtered with `--where`.
 
 ### Tasks in katTasks (todo.txt)
 
-With `enabled = true` under `[todo_txt]`, a task can be linked to a line in the todo.txt file [katTasks](https://github.com/devinthemtn/katTasks) uses. Add `kt:new` to its block (the GUI's `{` suggestions and `/kattasks` offer it), press `K` on it in the TUI's all-tasks view, click ⇄ in the GUI's all-tasks view, or run `katnotes tasks push page/house:5`. On save the task gets an ID, and the same ID goes on its todo.txt line:
+With `enabled = true` under `[todo_txt]`, a task can be linked to a line in the todo.txt file [katTasks](https://github.com/devinthemtn/katTasks) uses. Add `kt:new` to its block (the GUI's `{` suggestions and `/kattasks` offer it), press `K` on it in the TUI's all-tasks view, run `:push-tasks` to link every open task in the open note (done tasks are skipped), click ⇄ in the GUI's all-tasks view, or run `katnotes tasks push page/house:5`. On save the task gets an ID, and the same ID goes on its todo.txt line:
 
 ```
 - [ ] Call the plumber {due:2026-11-27 pri:high kt:7f3a2c}                 ← the note
@@ -163,7 +163,9 @@ With `enabled = true` under `[todo_txt]`, a task can be linked to a line in the 
 - Deleting a line in todo.txt doesn't bring it back; `push` on the task does. Lines whose note task is gone are listed by `sync-todo` as orphans, never deleted.
 - To bring in a task that already exists in todo.txt, run `:import-task` in either app and start typing: the list shows the open todo.txt tasks that aren't linked yet, narrowing as you type. Picking one adds it to the open note (TUI: the selected note; with none, today's journal) as a linked task. Its `due:`, `t:` and priority become `{due:…}`, `{start:…}` and `{pri:…}` (A high, B med, C and below low; the letter in todo.txt is kept), and other tags such as `rec:` stay on the todo.txt line only.
 - In katTasks, linked tasks show ⇄ and their `kn:` ID in their own colour, and **Linked to notes** in its sidebar lists them. Its `:add_to_note` links the task under the cursor to a note you pick (it runs `katnotes tasks import`), and `:open_note` opens the linked note here: the TUI from katTasks' terminal app, the GUI from katTasks-gui.
-- Notes with linked tasks show ⇄ after their title in both apps' lists. The GUI also shows a "⇄ katTasks N" badge under the open note's title, and the TUI's all-tasks view marks each linked task "⇄ katTasks".
+- With linking on, the GUI preview shows a button at the end of each task: ⇄ (not linked; click to link), ⇄… (links on save) or ⇄ ✓ (linked).
+- Notes with linked tasks get `kattasks: true` in their frontmatter and show ⇄ after their title in both apps' lists. The TUI's all-tasks view marks each linked task "⇄ katTasks".
+- The GUI's note header has a ⇄ katTasks button while the note has tasks: it shows how many are linked (`2/5`, counting linked and open tasks), and clicking it links the open ones; done tasks are skipped. Once every open task is linked it shows ⇄ katTasks ✓.
 - The done state of each ID at the last sync is kept in `todo-sync.json` in the config folder.
 
 Searching is plain grep:
@@ -239,7 +241,7 @@ katnotes link <id>             # print a Markdown link to the note
 katnotes recent                # notes opened lately in the TUI or GUI
 katnotes git status            # notes changed since the last commit
 katnotes theme [name] [--app tui|gui]   # show or set the shared (or one app's) theme
-katnotes tasks sync [-n]       # set/remove contains_task in every note (-n: dry run)
+katnotes tasks sync [-n]       # set/remove contains_task and kattasks in every note (-n: dry run)
 katnotes tasks list [--overdue] [--due-before fri] [--pri high] [--where key:value] [-a]
 katnotes tasks set page/<id>:<line> due tomorrow   # set {due:…}; no value removes the key
 katnotes tasks push page/<id>:<line>   # link the task to todo.txt for katTasks ([todo_txt] in config)
@@ -400,7 +402,7 @@ return {
 | `recent` | the notes you opened lately, in either app |
 | `search save <name>` / `search <name>` / `search rm <name>` | keep the current search, run a saved one, delete one |
 | `tasks [open\|done\|all] [any\|overdue\|week]` | the all-tasks view with those filters |
-| `sync-todo` / `push-task <line>` | sync linked tasks with todo.txt for katTasks / link the task on a body line (see [Tasks in katTasks](#tasks-in-kattasks-todotxt)) |
+| `sync-todo` / `push-task <line>` / `push-tasks` | sync linked tasks with todo.txt for katTasks / link the task on a body line / link every open task in the note (see [Tasks in katTasks](#tasks-in-kattasks-todotxt)) |
 | `import-task <task>` | add an unlinked todo.txt task to this note (or today's journal) as a linked task; the list searches todo.txt as you type |
 | `sync` | git: commit every change in the notes folder, then pull (rebase) and push if the branch has an upstream |
 | `git status` | git: the notes changed since the last commit |

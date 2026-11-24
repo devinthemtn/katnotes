@@ -332,7 +332,12 @@ kbd {
 .cmd-foot { padding: 2px 8px 0; }
 .item .pin { margin-right: 4px; font-size: .9em; }
 .kt-mark { margin-left: 5px; font-size: .85em; color: var(--muted, inherit); opacity: .75; }
+.kt-mark.linked { color: var(--accent); opacity: .9; }
 .kt-badge { font-size: .8em; padding: 0 6px; border: 1px solid currentColor; border-radius: 999px; opacity: .7; white-space: nowrap; }
+button.kt-badge { background: none; color: inherit; cursor: pointer; }
+button.kt-badge:hover:not(:disabled) { opacity: 1; background: var(--accent-soft); }
+button.kt-badge:disabled { cursor: default; }
+button.kt-badge.linked { color: var(--accent); }
 .item .warn { margin-right: 4px; color: var(--danger); }
 .item mark { background: var(--accent-soft); color: inherit; border-radius: 2px; }
 .list li.group { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); padding: 10px 10px 2px; }
@@ -458,6 +463,10 @@ kbd {
 .task-row:hover .task-tools, .task-tools:focus-within { opacity: 1; }
 .task-due { font-size: 12px; padding: 1px 4px; }
 .task-pri { font-size: 12px; font-weight: 700; padding: 1px 7px; }
+.preview .kt-link { font-size: 11px; padding: 0 6px; margin-left: 4px; line-height: 1.5; opacity: .55; vertical-align: 1px; }
+.preview .kt-link:hover, .preview .kt-link.pending { opacity: 1; }
+.preview .kt-link.linked { color: var(--accent); border-color: currentColor; opacity: .9; }
+.task-kt.linked { color: var(--accent, #2a7); border-color: currentColor; }
 
 /* {key:value} task metadata, shown as chips in the preview and task lists */
 .task-meta { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-left: 6px; vertical-align: 1px; text-decoration: none; }

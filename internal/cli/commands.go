@@ -384,9 +384,10 @@ func tasksCmd(a *App) *cobra.Command {
 	var dryRun bool
 	sync := &cobra.Command{
 		Use:   "sync",
-		Short: "Update the contains_task frontmatter field in every note",
+		Short: "Update the contains_task and kattasks frontmatter fields in every note",
 		Long: "Rescan every note and set contains_task: true in its frontmatter when the\n" +
-			"body has a task, or remove the field when it has none. Only notes that need\n" +
+			"body has a task, and kattasks: true when a task is linked to todo.txt\n" +
+			"(katTasks); remove each field when it doesn't apply. Only notes that need\n" +
 			"a change are rewritten, and their updated time is kept.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -408,6 +409,9 @@ func tasksCmd(a *App) *cobra.Command {
 				state := "contains_task: true"
 				if !c.ContainsTask {
 					state = "contains_task removed"
+				}
+				if c.Kattasks {
+					state += ", kattasks: true"
 				}
 				fmt.Fprintf(a.Out, "%s %s/%s (%s)\n", verb, c.Kind, c.ID, state)
 			}

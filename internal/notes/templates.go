@@ -118,7 +118,8 @@ func (s *Store) CreateFromTemplate(title, src string, tags []string) (*Note, err
 	if err != nil {
 		return nil, err
 	}
-	delete(t.Extra, TaskKey) // follows the body, set on save
+	delete(t.Extra, TaskKey) // these follow the body, set on save
+	delete(t.Extra, TodoLinkKey)
 	if len(t.Extra) > 0 {
 		for k, v := range t.Extra {
 			n.extra()[k] = v

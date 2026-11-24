@@ -159,7 +159,7 @@ func (s *Store) UnsetField(n *Note, key string) (*Note, error) {
 		fresh.Tags = []string{}
 	case "title", "created", "updated":
 		return nil, fmt.Errorf("%s: %w", key, ErrReservedField)
-	case "contains_task":
+	case TaskKey, TodoLinkKey:
 		return nil, fmt.Errorf("%s: %w (it follows the note's tasks)", key, ErrReservedField)
 	default:
 		if _, ok := fresh.Extra[key]; !ok {

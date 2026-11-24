@@ -245,7 +245,7 @@ func candidates(env *Env, spec *Spec, arg *Arg, prev []string) []Suggestion {
 		}
 		var out []Suggestion
 		for _, k := range keys {
-			if k == "contains_task" {
+			if notes.IsAutoField(k) {
 				continue
 			}
 			d := ""
@@ -371,7 +371,7 @@ func noteFields(env *Env, _ []string) []Suggestion {
 	}
 	keys := make([]string, 0, len(env.Note.Extra))
 	for k := range env.Note.Extra {
-		if k != "contains_task" {
+		if !notes.IsAutoField(k) {
 			keys = append(keys, k)
 		}
 	}

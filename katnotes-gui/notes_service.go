@@ -548,6 +548,40 @@ func (s *NotesService) PushTask(kind, id string, line int) (*notes.Note, error) 
 	return st.PushTask(k, id, line)
 }
 
+// PushAllTasks links every open task in a note that isn't linked to
+// todo.txt (katTasks) yet; done tasks are left alone. It returns the saved
+// note.
+func (s *NotesService) PushAllTasks(kind, id string) (*notes.Note, error) {
+	st := s.lock()
+	defer s.mu.Unlock()
+	k, err := notes.ParseKind(kind)
+	if err != nil {
+		return nil, err
+	}
+	n, _, err := st.PushAllTasks(k, id)
+	return n, err
+}
+
+// TodoFiles is where todo.txt sync would read and write, for the setup
+// dialog.
+type TodoFiles struct {
+	Todo       string `json:"todo"`
+	Done       string `json:"done"`
+	TodoExists bool   `json:"todoExists"`
+}
+
+// TodoFilesFor resolves the todo.txt and done.txt paths that [todo_txt]
+// with this file setting ("" for the default) would use.
+func (s *NotesService) TodoFilesFor(file string) TodoFiles {
+	s.mu.Lock()
+	t := s.cfg.TodoTxt
+	s.mu.Unlock()
+	t.File = file
+	todo, done := t.TodoFiles()
+	_, err := os.Stat(todo)
+	return TodoFiles{Todo: todo, Done: done, TodoExists: err == nil}
+}
+
 // TodoSync is the result of SyncTodo for the frontend.
 type TodoSync struct {
 	Enabled bool               `json:"enabled"`

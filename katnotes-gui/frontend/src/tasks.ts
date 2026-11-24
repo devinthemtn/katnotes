@@ -12,21 +12,52 @@ export function checkboxHTML({ checked }: { checked: boolean }): string {
 // Turn bare `[ ]` / `[x]` at the start of a paragraph line into task inputs
 // (GFM only does this inside list items), then number every task input in
 // document order. <pre> blocks are left untouched.
-export function decorateTasks(html: string): string {
+//
+// With links (each task's {kt:…} value from taskLinks), every task also gets
+// a katTasks link button at its end, and the kt chip is left out.
+export function decorateTasks(html: string, links?: string[]): string {
   let n = 0;
   return html
     .split(/(<pre[\s\S]*?<\/pre>)/)
     .map((part) => {
       if (part.startsWith('<pre')) return part;
-      return part
+      let out = part
         .replace(/(<p>|\n)\[( |x|X)\] /g, (_m, lead: string, mark: string) => lead + TASK_INPUT(mark !== ' ') + ' ')
         .replace(/<input type="checkbox" class="task"/g, () => `<input type="checkbox" class="task" data-task="${n++}"`)
         .replace(TASK_META_HTML, (m, lead: string, body: string, tail: string) => {
-          const pairs = parseMetaBody(unescapeHTML(body));
-          return pairs ? lead.replace(/\s+$/, '') + ' ' + metaChips(pairs) + tail : m;
+          let pairs = parseMetaBody(unescapeHTML(body));
+          if (!pairs) return m;
+          if (links) pairs = pairs.filter((p) => p.key !== 'kt');
+          return lead.replace(/\s+$/, '') + (pairs.length ? ' ' + metaChips(pairs) : '') + tail;
         });
+      if (links) {
+        out = out.replace(TASK_END_HTML, (_m, head: string, idx: string, tail: string) =>
+          head.replace(/\s+$/, '') + ' ' + ktButton(Number(idx), links[Number(idx)] ?? '') + tail);
+      }
+      return out;
     })
     .join('');
+}
+
+// The end of a rendered task's own text (as TASK_META_HTML), with its index.
+const TASK_END_HTML = /(<input type="checkbox" class="task" data-task="(\d+)"[^>]*>(?:(?!<\/li>|<input)[^\n])*?)(\s*(?:<\/p>|<\/li>|<ul|<ol|\n|$))/g;
+
+// The preview's katTasks button for task n with {kt:value}.
+function ktButton(n: number, value: string): string {
+  const [cls, label, title] =
+    value === '' ? ['', '⇄', 'Link to katTasks (todo.txt)']
+    : value === 'new' ? [' pending', '⇄…', 'Links to katTasks when the note is saved: click to link now']
+    : [' linked', '⇄ ✓', `Linked to katTasks (kt:${value}): click to write its todo.txt line again`];
+  return `<button type="button" class="kt-link${cls}" data-kt-task="${n}" title="${escapeHTML(title)}">${label}</button>`;
+}
+
+// Each task's {kt:…} value, in the order of taskLines ('' when not linked).
+export function taskLinks(body: string): string[] {
+  const lines = body.split('\n');
+  return taskLines(body).map((i) => {
+    const text = lines[i].replace(TASK_LINE, '').trim();
+    return splitMeta(text).pairs.find((p) => p.key === 'kt')?.value ?? '';
+  });
 }
 
 // A {…} block at the end of a rendered task's text: after the task input,
