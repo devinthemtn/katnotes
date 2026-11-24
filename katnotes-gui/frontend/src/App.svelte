@@ -278,6 +278,22 @@
   let bodyEl: HTMLTextAreaElement | undefined = $state();
   let titleEl: HTMLInputElement | undefined = $state();
   let tagsEl: HTMLInputElement | undefined = $state();
+  let previewEl: HTMLElement | undefined = $state();
+
+  // Split view: scrolling one pane scrolls the other to the same relative
+  // position. `syncing` marks the pane we just moved so its own scroll
+  // event doesn't bounce back and fight the user.
+  let syncing: HTMLElement | null = null;
+  function syncScroll(from: HTMLElement | undefined, to: HTMLElement | undefined) {
+    if (viewMode !== 'split' || !from || !to) return;
+    if (syncing === from) { syncing = null; return; }
+    const range = from.scrollHeight - from.clientHeight;
+    const frac = range > 0 ? from.scrollTop / range : 0;
+    const top = Math.round(frac * (to.scrollHeight - to.clientHeight));
+    if (Math.abs(to.scrollTop - top) < 1) return;
+    syncing = to;
+    to.scrollTop = top;
+  }
 
   let saveTimer: ReturnType<typeof setTimeout> | undefined;
   let searchTimer: ReturnType<typeof setTimeout> | undefined;
@@ -2514,7 +2530,7 @@
             onkeyup={(e) => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) { updateSlash(); updateLink(); updateMeta(); } }}
             onclick={() => { updateSlash(); updateLink(); updateMeta(); }}
             onblur={closeMenus}
-            onscroll={() => { if (slashOpen) updateSlash(); if (linkOpen) updateLink(); if (metaOpen) updateMeta(); }}
+            onscroll={() => { syncScroll(bodyEl, previewEl); if (slashOpen) updateSlash(); if (linkOpen) updateLink(); if (metaOpen) updateMeta(); }}
             spellcheck="true"
           ></textarea>
           <input type="file" accept="image/*" multiple hidden bind:this={imagePicker}
@@ -2544,7 +2560,7 @@
         {/if}
         {#if viewMode !== 'edit'}
           <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
-          <article class="preview" onclick={onPreviewClick}>{@html preview}</article>
+          <article class="preview" bind:this={previewEl} onclick={onPreviewClick} onscroll={() => syncScroll(previewEl, bodyEl)}>{@html preview}</article>
         {/if}
       </section>
 
