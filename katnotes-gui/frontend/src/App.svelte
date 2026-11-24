@@ -3,7 +3,7 @@
   import { marked } from 'marked';
   import { highlightExtension } from './highlight';
   import DOMPurify from 'dompurify';
-  import { checkboxHTML, decorateTasks, taskLinks, taskLines, stripMeta, TASK_LINE, toggleTask, makeTask, continueList, setTaskLine, setTaskMetaLine, metaChips, setStampDone, dateState, today, ensureMetaBlock } from './tasks';
+  import { checkboxHTML, decorateTasks, taskLinks, taskLines, stripMeta, TASK_LINE, toggleTask, makeTask, continueList, indentList, setTaskLine, setTaskMetaLine, metaChips, setStampDone, dateState, today, ensureMetaBlock } from './tasks';
   import { metaContext, suggest, setTodoLinks, applySuggestion, shouldPairBrace, type MetaContext, type MetaStat, type Suggestion } from './metacomplete';
   import { SLASH, matchSlash, mergeSlash, slashQuery, slashToken, expandSlash, applyUserResult, caretXY, type SlashCommand } from './slash';
   import { linkQuery, linkSuggestions, linkMarkdown, linkText, applyLink, decorateLinks, keyOf, type NoteRef, type LinkSuggestion } from './links';
@@ -241,7 +241,7 @@
       ['{', 'On a task line: start a {key:value} block; suggests due, pri, start and your keys, then values'],
       ['Ctrl+Space', 'On a task line: open the {…} suggestions (adds the block if needed)'],
       ['Click a box', 'In the preview: check or uncheck a task'],
-      ['Tab', 'In the editor: indent two spaces'],
+      ['Tab / Shift+Tab', 'In the editor: on a new list item (cursor at its bullet), nest it under the item above / move it back out; elsewhere Tab indents two spaces'],
     ]},
     { title: 'Finding', keys: [
       [`${modLabel}+F / ${modLabel}+K / /`, 'Focus search (/ outside text fields); Tab in the box switches Name (fuzzy title/filename) · Tags · Text'],
@@ -2208,7 +2208,15 @@
       }
     }
     if (e.key === 'Tab' && bodyEl) {
+      const cl = !e.ctrlKey && !e.metaKey && !e.altKey ? caretLine() : null;
+      const r = cl && indentList(bodyEl.value.slice(0, Math.max(0, cl.start - 1)), cl.text, cl.col, e.shiftKey);
+      if (cl && r) {
+        e.preventDefault();
+        if (r.text !== cl.text) replaceRange(cl.start, cl.end, r.text, cl.start + r.col);
+        return;
+      }
       e.preventDefault();
+      if (e.shiftKey) return;
       const { selectionStart: s, selectionEnd: end } = bodyEl;
       draftBody = draftBody.slice(0, s) + '  ' + draftBody.slice(end);
       tick().then(() => bodyEl?.setSelectionRange(s + 2, s + 2));

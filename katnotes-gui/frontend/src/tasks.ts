@@ -345,6 +345,54 @@ export function continueList(line: string, col: number): { text: string; col: nu
   return { text, col: (col === head ? head : before.length) + 1 + prefix.length };
 }
 
+// Tab / Shift+Tab on a list item with the cursor in or right after its bullet
+// (and box). Tab nests the item under the item above by indenting it to that
+// item's text column ("- " → 2 spaces, "1. " → 3), so Markdown renders it as a
+// child; a nested numbered item restarts at 1. Shift+Tab moves it back out to
+// its parent's indent. `above` is the body text before the line. Returns the
+// new line and cursor column, or null when this isn't such a line (the caller
+// then does its normal Tab), and the unchanged line when there is nothing to
+// nest under or out of.
+export function indentList(above: string, line: string, col: number, out = false): { text: string; col: number } | null {
+  const m = line.match(LIST_PARTS);
+  if (!m || !m[2] || /[^ \t]/.test(m[1]) || col > m[0].length) return null;
+  const lead = m[1].length;
+  // The nearest list items above: the first one at this indent or less, and
+  // the first one strictly less (the parent). Indented non-list lines are
+  // continuations; a blank line is allowed; an unindented paragraph ends it.
+  let sib: RegExpMatchArray | null = null;
+  let parent: RegExpMatchArray | null = null;
+  const lines = above.split('\n');
+  for (let i = lines.length - 1; i >= 0 && !parent; i--) {
+    const l = lines[i];
+    if (l.trim() === '') continue;
+    const p = l.match(LIST_PARTS);
+    if (!p || !p[2] || /[^ \t]/.test(p[1])) {
+      if (/^\S/.test(l)) break;
+      continue;
+    }
+    if (p[1].length <= lead && !sib) sib = p;
+    if (p[1].length < lead) parent = p;
+  }
+  let indent: number;
+  let bullet = m[2];
+  const num = bullet.match(/^(\d+)([.)])(\s+)$/);
+  if (out) {
+    if (!parent) return { text: line, col };
+    indent = parent[1].length;
+    const pn = parent[2].match(/^(\d+)[.)]/);
+    if (num) bullet = (pn ? Number(pn[1]) + 1 : 1) + num[2] + num[3];
+  } else {
+    if (!sib || sib[1].length < lead) return { text: line, col };
+    indent = sib[1].length + sib[2].length;
+    if (num) bullet = '1' + num[2] + num[3];
+  }
+  const head = ' '.repeat(indent) + bullet;
+  const old = lead + m[2].length;
+  const text = head + line.slice(old);
+  return { text, col: Math.max(0, col + head.length - old) };
+}
+
 // Rewrite one line for the /todo trigger. `col` is the cursor column, right
 // after the "/todo" token. Returns the new line and cursor column, or null if
 // the text before the cursor doesn't end with a standalone /todo.

@@ -1,7 +1,7 @@
 // Run with: npm test (node --test; Node 22.18+/24 strips the types).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { continueList } from './tasks.ts';
+import { continueList, indentList } from './tasks.ts';
 
 // col at the "|" in s; the result is shown the same way.
 function enter(s: string): string | null {
@@ -59,4 +59,37 @@ test('taskLinks and the preview katTasks buttons', async () => {
   const off = decorateTasks(html);
   assert.doesNotMatch(off, /kt-link/);
   assert.match(off, /meta-kt/);
+});
+
+// The last line of s is edited; col at the "|" in it.
+function tab(s: string, out = false): string | null {
+  const i = s.lastIndexOf('\n');
+  const line = s.slice(i + 1);
+  const col = line.indexOf('|');
+  const r = indentList(s.slice(0, Math.max(0, i)), line.replace('|', ''), col, out);
+  return r && r.text.slice(0, r.col) + '|' + r.text.slice(r.col);
+}
+
+test('indentList', () => {
+  assert.equal(tab('- one\n- |'), '  - |');
+  assert.equal(tab('1. one\n2. |'), '   1. |');
+  assert.equal(tab('- one\n1. |'), '  1. |');
+  assert.equal(tab('10. ten\n11. |'), '    1. |');
+  assert.equal(tab('- [ ] task\n- [ ] |'), '  - [ ] |');
+  assert.equal(tab('- one\n  - two\n  - |'), '    - |');
+  assert.equal(tab('- one\n  more text\n- |'), '  - |');
+  assert.equal(tab('- one\n|- two'), '  |- two');
+  // Already the first child, or nothing above: unchanged.
+  assert.equal(tab('- one\n  - |'), '  - |');
+  assert.equal(tab('- |'), '- |');
+  assert.equal(tab('para\n\n- |'), '- |');
+  // Not at the bullet, not a list, or quoted: normal Tab.
+  assert.equal(tab('- one\n- two|'), null);
+  assert.equal(tab('- one\ntext|'), null);
+  assert.equal(tab('> - one\n> - |'), null);
+  // Shift+Tab moves out to the parent's indent.
+  assert.equal(tab('- one\n  - |', true), '- |');
+  assert.equal(tab('1. one\n   1. |', true), '2. |');
+  assert.equal(tab('- one\n    - two\n      - |', true), '    - |');
+  assert.equal(tab('- |', true), '- |');
 });
