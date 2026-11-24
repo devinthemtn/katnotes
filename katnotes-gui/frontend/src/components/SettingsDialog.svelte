@@ -133,7 +133,7 @@
   </label>
   <div class="row font-row">
     <label>todo.txt
-      <input value={cfg.todo_txt?.file ?? ''} placeholder="katTasks' files.todo, else ~/todo.txt" onchange={(e) => onsave('todo_txt.file', val(e))} />
+      <input value={cfg.todo_txt?.file ?? ''} placeholder="empty: same file as katTasks" onchange={(e) => onsave('todo_txt.file', val(e))} />
     </label>
     <label>done.txt
       <input value={cfg.todo_txt?.done_file ?? ''} placeholder="next to todo.txt" onchange={(e) => onsave('todo_txt.done_file', val(e))} />

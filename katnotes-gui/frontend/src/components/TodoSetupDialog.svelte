@@ -12,7 +12,7 @@
 
   // svelte-ignore state_referenced_locally
   let file = $state(initialFile);
-  let resolved = $state<{ todo: string; done: string; todoExists: boolean } | null>(null);
+  let resolved = $state<{ todo: string; done: string; todoExists: boolean; katTasks: string; sameAsKatTasks: boolean } | null>(null);
 
   $effect(() => {
     const f = file.trim();
@@ -35,7 +35,7 @@
     and tasks checked in katTasks come back to the note.
   </p>
   <label class="field">todo.txt file
-    <input bind:value={file} placeholder="empty: katTasks' files.todo, else ~/todo.txt" />
+    <input bind:value={file} placeholder="leave empty to use the same file as katTasks" />
   </label>
   {#if resolved}
     <p class="hint">
@@ -43,6 +43,13 @@
       {#if !resolved.todoExists}(doesn't exist yet; it will be created){/if}
       <br />Done tasks: <code>{resolved.done}</code>
     </p>
+    {#if !resolved.sameAsKatTasks}
+      <p class="warn">
+        katTasks reads <code>{resolved.katTasks}</code>, a different file: tasks linked here won't show up there,
+        and checking them there won't reach your notes.
+        <button onclick={() => (file = '')}>Use katTasks' file</button>
+      </p>
+    {/if}
   {/if}
   <p class="hint">
     This sets <code>enabled = true</code> under <code>[todo_txt]</code> in config.toml. You can change it later
@@ -58,4 +65,6 @@
   .field { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; }
   .field input { width: 100%; }
   code { word-break: break-all; }
+  .warn { color: var(--danger); }
+  .warn button { margin-left: 6px; }
 </style>

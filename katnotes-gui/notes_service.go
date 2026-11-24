@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 
@@ -568,6 +570,20 @@ type TodoFiles struct {
 	Todo       string `json:"todo"`
 	Done       string `json:"done"`
 	TodoExists bool   `json:"todoExists"`
+	// KatTasks is the todo.txt katTasks' own config names ("" when it has
+	// none); SameAsKatTasks is whether Todo is that file.
+	KatTasks       string `json:"katTasks"`
+	SameAsKatTasks bool   `json:"sameAsKatTasks"`
+}
+
+// samePath reports whether a and b name the same file: compared cleaned,
+// and ignoring case on Windows.
+func samePath(a, b string) bool {
+	a, b = filepath.Clean(a), filepath.Clean(b)
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(a, b)
+	}
+	return a == b
 }
 
 // TodoFilesFor resolves the todo.txt and done.txt paths that [todo_txt]
@@ -579,7 +595,11 @@ func (s *NotesService) TodoFilesFor(file string) TodoFiles {
 	t.File = file
 	todo, done := t.TodoFiles()
 	_, err := os.Stat(todo)
-	return TodoFiles{Todo: todo, Done: done, TodoExists: err == nil}
+	kt, _ := config.KatTasksFiles()
+	return TodoFiles{
+		Todo: todo, Done: done, TodoExists: err == nil,
+		KatTasks: kt, SameAsKatTasks: kt == "" || samePath(todo, kt),
+	}
 }
 
 // TodoSync is the result of SyncTodo for the frontend.

@@ -104,6 +104,14 @@ func (t TodoTxt) TodoFiles() (todo, done string) {
 	return todo, done
 }
 
+// KatTasksFiles returns files.todo and files.done from katTasks' own
+// config.toml, expanded; empty when katTasks has no config or leaves them
+// unset.
+func KatTasksFiles() (todo, done string) {
+	f := katTasksFiles()
+	return f.Todo, f.Done
+}
+
 // katTasksFiles reads [files] from katTasks' config.toml
 // (os.UserConfigDir()/katTasks/config.toml). Missing values are empty.
 func katTasksFiles() (f struct{ Todo, Done string }) {
