@@ -363,6 +363,8 @@ type model struct {
 
 	mode    mode
 	purpose inputPurpose
+
+	todoStamp string // todo.txt/done.txt stamp at the last sync
 	input   textinput.Model
 	confirm *notes.Note
 	help    viewport.Model
@@ -516,7 +518,33 @@ func (m *model) setItemHeight(items []list.Item) {
 	m.rowH = h
 }
 
-func (m model) Init() tea.Cmd { return nil }
+func (m model) Init() tea.Cmd { return m.todoTick() }
+
+// todoTickMsg polls todo.txt so tasks checked in katTasks show up while the
+// TUI is open.
+type todoTickMsg struct{}
+
+const todoPoll = 2 * time.Second
+
+func (m *model) todoTick() tea.Cmd {
+	if m.app.Store.Todo == nil {
+		return nil
+	}
+	return tea.Tick(todoPoll, func(time.Time) tea.Msg { return todoTickMsg{} })
+}
+
+// checkTodo syncs when todo.txt or done.txt changed since the last sync.
+// It waits while a prompt is open, so the list doesn't move under it.
+func (m *model) checkTodo() {
+	if m.mode != modeNormal || m.app.Store.Todo == nil || m.app.Store.Todo.Stamp() == m.todoStamp {
+		return
+	}
+	if s := m.syncTodo(); s != "" {
+		m.resetCache()
+		m.reload()
+		m.setStatus(s)
+	}
+}
 
 // reload rebuilds the list for the current tab, filters and search.
 func (m *model) reload() {
@@ -744,6 +772,7 @@ func (m *model) syncTodo() string {
 		return ""
 	}
 	changes, err := m.app.Store.SyncTodo(false)
+	m.todoStamp = m.app.Store.Todo.Stamp()
 	if err != nil {
 		return "todo.txt: " + err.Error()
 	}
@@ -987,6 +1016,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 		m.layout()
 		return m, nil
+
+	case todoTickMsg:
+		m.checkTodo()
+		return m, m.todoTick()
 
 	case cmdResultMsg:
 		return m, m.applyResult(msg.line, msg.r, msg.err)

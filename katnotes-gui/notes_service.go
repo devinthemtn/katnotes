@@ -605,6 +605,17 @@ func (s *NotesService) SyncTodo() (TodoSync, error) {
 	return TodoSync{Enabled: true, Changes: changes, Summary: commands.SummarizeTodo(changes), Notes: commands.TodoNotesChanged(changes)}, err
 }
 
+// TodoStamp changes whenever todo.txt or done.txt does; "" with sync off.
+// The frontend polls it to sync while katTasks edits the files.
+func (s *NotesService) TodoStamp() string {
+	st := s.lock()
+	defer s.mu.Unlock()
+	if st.Todo == nil {
+		return ""
+	}
+	return st.Todo.Stamp()
+}
+
 // TodoError returns the last todo.txt sync failure since the previous call,
 // or "". Saving never fails because of one.
 func (s *NotesService) TodoError() string {

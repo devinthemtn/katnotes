@@ -324,3 +324,22 @@ func TestPushAllTasks(t *testing.T) {
 		t.Errorf("second push linked %d, want 0", count)
 	}
 }
+
+func TestTodoStampChanges(t *testing.T) {
+	dir := t.TempDir()
+	ts := &TodoSync{File: filepath.Join(dir, "todo.txt")}
+	empty := ts.Stamp()
+	if err := os.WriteFile(ts.File, []byte("a task\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	one := ts.Stamp()
+	if one == empty {
+		t.Fatal("stamp didn't change when todo.txt was written")
+	}
+	if err := os.WriteFile(filepath.Join(dir, "done.txt"), []byte("x done\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if ts.Stamp() == one {
+		t.Fatal("stamp didn't change when done.txt was written")
+	}
+}

@@ -90,17 +90,35 @@ type todoBatch struct {
 	reserved     map[string]bool // IDs given out in this batch
 }
 
+// doneFile is DoneFile, or done.txt next to todo.txt.
+func (t *TodoSync) doneFile() string {
+	if t.DoneFile != "" {
+		return t.DoneFile
+	}
+	return filepath.Join(filepath.Dir(t.File), "done.txt")
+}
+
+// Stamp changes whenever todo.txt or done.txt does (mtime and size), so a
+// running TUI or GUI can poll it and sync when katTasks writes.
+func (t *TodoSync) Stamp() string {
+	var parts []string
+	for _, p := range []string{t.File, t.doneFile()} {
+		if fi, err := os.Stat(p); err == nil {
+			parts = append(parts, FileStamp(fi))
+		} else {
+			parts = append(parts, "-")
+		}
+	}
+	return strings.Join(parts, "|")
+}
+
 func (t *TodoSync) begin(now time.Time, noDoneDate bool) (*todoBatch, error) {
 	b := &todoBatch{t: t, now: now, noDoneDate: noDoneDate, state: todoState{Done: map[string]bool{}}}
 	var err error
 	if b.todo, err = todotxt.Load(t.File); err != nil {
 		return nil, err
 	}
-	doneFile := t.DoneFile
-	if doneFile == "" {
-		doneFile = filepath.Join(filepath.Dir(t.File), "done.txt")
-	}
-	if b.done, err = todotxt.Load(doneFile); err != nil {
+	if b.done, err = todotxt.Load(t.doneFile()); err != nil {
 		return nil, err
 	}
 	if t.StatePath != "" {

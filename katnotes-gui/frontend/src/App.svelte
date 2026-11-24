@@ -465,6 +465,7 @@
   async function syncTodo(announce = false) {
     try {
       const r = await api.SyncTodo();
+      todoStamp = await api.TodoStamp();
       if (!r?.enabled) return;
       todoEnabled = true;
       setTodoLinks(true);
@@ -982,6 +983,23 @@
   function noteChanged(fresh: Note, shown: Note): boolean {
     const view = (n: Note) => JSON.stringify([n.title, n.tags ?? [], n.extra ?? {}, n.updated, n.problem ?? '', (n.body ?? '').replace(/\n$/, '')]);
     return view(fresh) !== view(shown);
+  }
+
+  // todo.txt is polled so tasks checked in katTasks show up while this
+  // window stays open; a change runs the same refresh as refocusing.
+  let todoStamp = '';
+  let todoPolling = false;
+  async function pollTodo() {
+    if (!todoEnabled || todoPolling || saving()) return;
+    todoPolling = true;
+    try {
+      const stamp = await api.TodoStamp();
+      if (stamp && stamp !== todoStamp) await onFocus();
+    } catch {
+      // Mid-write; try next tick.
+    } finally {
+      todoPolling = false;
+    }
   }
 
   // Pick up edits made by the CLI/TUI when the window regains focus.
@@ -2213,6 +2231,7 @@
     syncTodo(true).then(loadViewState).then(refreshList).then(openStartPage);
     loadCmdCatalog();
     window.addEventListener('focus', onFocus);
+    const todoTimer = setInterval(pollTodo, 2000);
     applyTheme();
     darkQuery.addEventListener('change', applyTheme);
     // Ctrl+Shift+Z is bound in main.go (Wails swallows it on Linux).
@@ -2224,6 +2243,7 @@
       stopExternalWatch();
       darkQuery.removeEventListener('change', applyTheme);
       window.removeEventListener('focus', onFocus);
+      clearInterval(todoTimer);
       window.removeEventListener('katnotes:toggle-zoom', toggleZoom);
       window.removeEventListener('katnotes:files-dropped', onNativeDrop);
       window.removeEventListener('katnotes:open-note', onOpenNote);
