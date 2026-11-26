@@ -71,6 +71,11 @@ type Config struct {
 	// TodoTxt links tasks marked {kt:new} to a todo.txt file, e.g. the one
 	// katTasks uses ([todo_txt] in config.toml).
 	TodoTxt TodoTxt `toml:"todo_txt" json:"todo_txt"`
+	// Callouts adds or restyles "> [!type]" callout blocks in the GUI
+	// preview ([callouts.<type>] in config.toml). See callouts.go.
+	Callouts map[string]Callout `toml:"callouts,omitempty" json:"callouts"`
+	// CalloutErrors lists the [callouts] entries Load dropped as invalid.
+	CalloutErrors []string `toml:"-" json:"callout_errors"`
 }
 
 // TodoTxt holds the todo.txt link options.
@@ -259,6 +264,7 @@ func Load() (Config, error) {
 		cfg.NotesDir = env
 	}
 	cfg.NotesDir = ExpandHome(cfg.NotesDir)
+	cfg.Callouts, cfg.CalloutErrors = normalizeCallouts(cfg.Callouts)
 	return cfg, nil
 }
 

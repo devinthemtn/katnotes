@@ -98,6 +98,32 @@ heading = "#2ec4b6"
 
 Text inside `{{ }}` in a note, such as `{{follow up with Sam}}`, is highlighted in the preview of both apps (not inside code): `highlight` is its text colour and `highlight_bg` the background behind it. Theme files written before these existed simply use the built-in colours until you add them.
 
+### Callouts
+
+A blockquote whose first line is `[!type]` shows in the GUI preview as a coloured box with an icon and title, like GitHub's alerts. The five GitHub types work out of the box: `NOTE` (blue), `TIP` (green), `IMPORTANT` (purple), `WARNING` (amber) and `CAUTION` (red). The type is case-insensitive, and text after the marker replaces the title:
+
+```markdown
+> [!WARNING]
+> Back up the database first.
+
+> [!idea] Something to try
+> Body text, lists, code… all work in here.
+```
+
+Add your own types, or restyle the built-in ones, in `config.toml`. A new type needs a `color` (any CSS colour). `icon` and `title` are optional; the title defaults to the type name, capitalized. An unknown type stays a plain quote, as on GitHub. The TUI preview shows callouts as plain quotes. [katdown](https://github.com/devinthemtn/katdown) reads the same `[callouts]` tables from its own config.
+
+```toml
+[callouts.idea]
+color = "#e0af68"
+icon = "🧠"
+title = "Idea"
+
+[callouts.warning]   # override a built-in
+color = "orange"
+```
+
+Invalid entries are skipped and reported when the GUI loads its config.
+
 ## Finding notes
 
 Both apps have the same search with three modes. In the TUI, `/` opens a live search bar and Tab switches the mode. In the GUI, use the Name / Tags / Text buttons over the search box, or press Tab in the box.

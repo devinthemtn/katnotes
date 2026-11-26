@@ -2,6 +2,7 @@
   import { onMount, tick } from 'svelte';
   import { marked } from 'marked';
   import { highlightExtension } from './highlight';
+  import { calloutExtension, calloutCSS, setCallouts } from './callouts';
   import DOMPurify from 'dompurify';
   import { checkboxHTML, decorateTasks, taskLinks, taskLines, stripMeta, TASK_LINE, toggleTask, makeTask, continueList, indentList, setTaskLine, setTaskMetaLine, metaChips, setStampDone, dateState, today, ensureMetaBlock } from './tasks';
   import { metaContext, suggest, setTodoLinks, applySuggestion, shouldPairBrace, type MetaContext, type MetaStat, type Suggestion } from './metacomplete';
@@ -26,7 +27,7 @@
   import type { State as ViewStateT } from '../bindings/github.com/devinthemtn/katnotes/internal/viewstate';
   import type { Completion as CmdCompletion, Result as CmdResult, Choice as CmdChoice, Spec as CmdSpec } from '../bindings/github.com/devinthemtn/katnotes/internal/commands';
 
-  marked.use({ renderer: { checkbox: checkboxHTML } }, highlightExtension);
+  marked.use({ renderer: { checkbox: checkboxHTML } }, highlightExtension, calloutExtension);
 
   type Tab = 'page' | 'journal' | 'tags' | 'tasks';
   type ViewMode = 'edit' | 'split' | 'preview';
@@ -320,8 +321,12 @@
   }
 
 
+  // Bumped when [callouts] in config.toml changes, so the preview re-renders.
+  let calloutsVersion = $state(0);
+  let calloutStyle = $state('');
+  let themeDark = $state(false);
   let preview = $derived(
-    rewriteImageSrc(
+    (void calloutsVersion, rewriteImageSrc(
       DOMPurify.sanitize(
         decorateLinks(
           decorateTasks(marked.parse(draftBody, { async: false, gfm: true, breaks: false }) as string, todoEnabled ? taskLinks(draftBody) : undefined),
@@ -329,8 +334,17 @@
           (kind, id) => linkKeys.has(`${kind}/${id}`),
         ),
       ),
-    )
+    ))
   );
+
+  // [callouts] from config.toml: custom "> [!type]" boxes in the preview.
+  function applyCallouts(c: Config) {
+    setCallouts(c.callouts as Record<string, { color?: string; icon?: string; title?: string }> | undefined);
+    calloutStyle = calloutCSS(themeDark);
+    calloutsVersion++;
+    const errs = c.callout_errors ?? [];
+    if (errs.length) flash('config.toml: ' + errs.join('; '), true);
+  }
 
   function parseTags(s: string): string[] {
     return s.split(/[,\s]+/).map((t) => t.replace(/^#/, '').trim().toLowerCase()).filter(Boolean);
@@ -834,6 +848,8 @@
         if (v) root.setProperty('--' + k.replace(/_/g, '-'), v);
       }
       root.setProperty('color-scheme', info.theme.dark ? 'dark' : 'light');
+      themeDark = !!info.theme.dark;
+      calloutStyle = calloutCSS(themeDark);
       if (info.error && info.error !== themeErrShown) flash(info.error, true);
       themeErrShown = info.error;
     } catch (e) {
@@ -854,6 +870,7 @@
     try {
       const c = await api.ReloadConfig();
       applyFonts(c);
+      applyCallouts(c);
       await applyTheme();
       fmOpen = !c.frontmatter_collapsed;
       setStampDone(c.task_done_date !== false);
@@ -894,6 +911,7 @@
     try {
       const c = await api.GetConfig();
       applyFonts(c);
+      applyCallouts(c);
       fmOpen = !c.frontmatter_collapsed;
       setStampDone(c.task_done_date !== false);
       start = c.start_page || 'none';
@@ -2268,6 +2286,8 @@
 {/snippet}
 
 <svelte:window onkeydown={onKey} />
+<!-- calloutCSS validates names and colours, so this can't break out of the rule. -->
+<svelte:head>{@html `<style id="callout-colors">${calloutStyle}</style>`}</svelte:head>
 
 <div class="app" class:zoomed>
   {#if !zoomed}

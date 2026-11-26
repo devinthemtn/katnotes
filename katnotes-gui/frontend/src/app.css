@@ -183,6 +183,11 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); }
 .preview pre { background: var(--code-bg); padding: 12px 14px; border-radius: 6px; overflow-x: auto; }
 .preview pre code { background: none; padding: 0; }
 .preview blockquote { border-left: 3px solid var(--accent); margin: 0; padding: 2px 14px; color: var(--muted); }
+.preview .callout { --callout-color: var(--accent); border-left: 4px solid var(--callout-color); background: color-mix(in srgb, var(--callout-color) 9%, transparent); border-radius: 0 6px 6px 0; margin: 1em 0; padding: 8px 14px; }
+.preview .callout > :first-child { margin-top: 0; }
+.preview .callout > :last-child { margin-bottom: 0; }
+.preview .callout-title { color: var(--callout-color); font-weight: 600; display: flex; gap: 6px; align-items: baseline; }
+.preview .callout-icon { font-style: normal; }
 .preview a { color: var(--accent); }
 .preview mark.hl { background: var(--highlight-bg); color: var(--highlight); padding: 0 2px; border-radius: 3px; }
 .preview table { border-collapse: collapse; }
